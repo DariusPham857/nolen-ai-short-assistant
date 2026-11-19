@@ -1,4 +1,4 @@
-﻿# Repository Guidelines
+# Repository Guidelines
 
 ## Project Structure
 
@@ -160,10 +160,11 @@ Agents and contributors working on this codebase MUST uphold these core rules at
 - Final assembly produces a 30–60s MP4 incorporating only approved video assets in canonical story order, mixed with voice-over, commercially cleared BGM, and subtitles.
 - Cost comparisons against an all-in-one platform baseline must be labeled `MODELED_ONLY` if based on price quotes, and `OBSERVED` only when actually executed with identical specifications. Never fabricate cost savings or quality rankings.
 
-### 6. Mandatory Plan Mode, Recursive Task Breakdown & Documentation Handoff
-- **Plan-First**: Always formulate an explicit implementation plan before modifying any code. Zero blind coding without agreed task structure and verification criteria.
-- **Recursive Task Breakdown**: Break down work into small, atomic tasks. If a task spans multiple domain layers, touches too many files, or cannot be tested in isolation, recursively split it into sub-tasks until each is atomic.
-- **Per-Task Documentation Handoff**: Every coding task MUST conclude with an explicit handoff registering all created or modified files with project documentation (PRD requirements, architecture specs, schema/index references) along with verifiable test evidence. See [.agents/rules/plan-breakdown-handoff.md](.agents/rules/plan-breakdown-handoff.md).
+### 6. Engineering workflow
+- Follow [Plan, Scope, Task Breakdown & Handoff](.agents/rules/plan-breakdown-handoff.md), the canonical workflow.
+- Follow [Engineering Exceptions & Review](.agents/rules/engineering-exceptions.md), the canonical workaround/debt policy.
+- [ENG-DEC-001](docs/development/ENG-DEC-001.md) defines source ownership and evidence statuses. Other documents reference canonical rules rather than redefining them.
+- Use [feature specs](specs/README.md) and the single [debt tracker](docs/DEBT.md).
 
 ---
 
@@ -185,7 +186,7 @@ Agents and contributors working on this codebase MUST uphold these core rules at
 - Use TypeScript with strict type checking enabled across both `clients/` and `servers/`.
 - Maintain clear directory structures aligning with the domain entities (`films`, `stories`, `shots`, `attempts`, `ledger`, `providers`).
 - Add docstrings or concise comments explaining the purpose, side effects, and invariants of every function and method.
-- Follow [Plan-First, Task Breakdown & Doc Handoff](.agents/rules/plan-breakdown-handoff.md): enter plan mode, break down into atomic tasks (recursively splitting any task that is too large), and conclude every coding task with a handoff registering code files with project documentation.
+- Task sizing and handoff follow the canonical workflow linked above.
 - Follow [Ponytail](.agents/rules/ponytail.md) ([upstream](https://github.com/DietrichGebert/ponytail)) and [Karpathy coding guidelines](.agents/rules/karpathy-guidelines.md) ([upstream](https://github.com/multica-ai/andrej-karpathy-skills)): keep edits minimal, focused, and define observable verification criteria for each change.
 
 ---

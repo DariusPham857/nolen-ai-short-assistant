@@ -1,30 +1,35 @@
-## Description
+## Problem and result
 
-<!-- Briefly describe the goal and functional changes introduced in this PR -->
+<!-- Explain behavior and scope; link spec and tasks. -->
 
-## PRD & Architecture References
+## Traceability
 
-- **PRD Requirements**: <!-- e.g., FR-02 (Storyboard), FR-09 (Ledger), DEC-P01 (Co-pilot), DEC-P02 (Budget Guardrail) -->
-- **Acceptance Tests**: <!-- e.g., AT-P01-01, AT-P02-03, AT-P04-08 -->
-- **IT Ownership**: <!-- IT 1 (Backend/Finance/Jobs) | IT 2 (Frontend/Media/Reporting) | Shared -->
+- Spec/task:
+- FR / DEC / AT:
+- REQUIRED changes / evidenced PREREQUISITEs:
+- Public contracts/schema changes (or none):
 
-## Key Changes
+## Verification
 
-- [ ] Domain / Schema / Migrations: <!-- Summarize if applicable -->
-- [ ] API & Server Endpoints: <!-- Summarize if applicable -->
-- [ ] UI & Components: <!-- Adheres to Three-Pane Workstation, DESIGN.md tokens, and Anti-Slop rules -->
-- [ ] Invariants Preserved: <!-- Integer-micros, reserve-before-dispatch, append-only ledger, distinct state machines -->
+<!-- Follow docs/development/ENG-DEC-001.md. For each check provide command,
+commit/environment, status, scope, actual result and evidence. Missing checks are
+BLOCKED/NOT_IMPLEMENTED/NOT_APPLICABLE with reason, never PASS. -->
 
-## Verification & Testing Performed
+| Check | Status | Evidence / limitations |
+|---|---|---|
+| QG-CODE | | |
+| QG-ARCH | | |
+| QG-DOMAIN | | |
+| QG-INTEGRATION | | |
+| QG-EVIDENCE | | |
 
-- [ ] Automated Unit Tests: `pnpm test` <!-- Paste relevant output or test filenames -->
-- [ ] Integration Tests: <!-- Real PostgreSQL 16 tested for concurrency/locking -->
-- [ ] UI / Visual Verification: <!-- Desktop & responsive layout checked -->
-- [ ] Preflight / Health Checks: `/api/health/live` & `/api/health/ready` verified
+## Review and handoff
 
-## Checklist
+- Read-only review findings / remaining blockers:
+- Debt IDs and owner approval evidence (or none):
+- Files/interfaces registered in tasks.md:
+- Rollback and next dependency:
+- Secrets and LIVE/REPLAY provenance checked:
 
-- [ ] Branch follows `feature/<name>` (or `fix/<name>`).
-- [ ] Commits adhere to Conventional Commits (`feat(...)`, `fix(...)`, `docs(...)`).
-- [ ] No secrets, `.env`, or sensitive credentials committed.
-- [ ] `REPLAY` mode explicitly labeled where mock fixtures are used.
+Sources: [workflow](../.agents/rules/plan-breakdown-handoff.md),
+[exceptions](../.agents/rules/engineering-exceptions.md).
