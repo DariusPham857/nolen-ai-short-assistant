@@ -29,3 +29,7 @@ Thumbs.db
 
 # PR helper drafts
 .pr_draft.md
+
+# External sub-repo clones in .agents
+.agents/andrej-karpathy-skills/
+.agents/ponytail/
