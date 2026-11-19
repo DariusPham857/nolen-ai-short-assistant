@@ -1,0 +1,71 @@
+# ──────────────────────────────────────────────────────────
+# nolen-ai-short-assistant — Docker Compose (DEC-P05)
+#
+# Single-machine localhost demo topology.
+# Services: web (API), worker (pg-boss), db (PostgreSQL 16)
+# Ingress strictly bound to 127.0.0.1:3000 / 127.0.0.1:3001
+# Database internal port NOT published to host network.
+#
+# Usage:
+#   docker compose up -d db       # start DB only (for dev)
+#   docker compose up             # start all services
+#
+# @see PRD §19 DEC-P05
+# ──────────────────────────────────────────────────────────
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: nolen-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nolen
+      POSTGRES_PASSWORD: nolen_dev
+      POSTGRES_DB: nolen_film
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Internal only — not published to host per DEC-P05
+    # For local dev convenience, uncomment the next 2 lines:
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nolen -d nolen_film"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # web:
+  #   build:
+  #     context: ./servers
+  #     dockerfile: Dockerfile
+  #   container_name: nolen-web
+  #   restart: unless-stopped
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql://nolen:nolen_dev@db:5432/nolen_film
+  #     EXECUTION_MODE: REPLAY
+  #     PORT: 3001
+  #     HOST: 0.0.0.0
+  #   ports:
+  #     - "127.0.0.1:3001:3001"
+
+  # worker:
+  #   build:
+  #     context: ./servers
+  #     dockerfile: Dockerfile
+  #   container_name: nolen-worker
+  #   command: ["node", "dist/worker/index.js"]
+  #   restart: unless-stopped
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql://nolen:nolen_dev@db:5432/nolen_film
+  #     EXECUTION_MODE: REPLAY
+  #     WORKER_CONCURRENCY: 2
+
+volumes:
+  pgdata:
+    driver: local
