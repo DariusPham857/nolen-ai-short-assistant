@@ -186,18 +186,23 @@ Agents and contributors working on this codebase MUST uphold these core rules at
 
 ## Commits and Pull Requests
 
-1. Start every feature or fix on a new branch from `main`:
+1. Start every feature or fix on a new branch from `main` using the branch creator:
    ```bash
-   git switch -c feat/<feature-name>
-   # or
-   git switch -c fix/<bug-name>
+   .\scripts\create_branch.ps1 <feature-name>
+   # or bash: ./scripts/create_branch.sh <feature-name>
+   # manual: git switch -c feature/<feature-name>
    ```
-2. Commit each logical code change as soon as it is verified, including corresponding tests. Use [Conventional Commits](https://github.com/conventional-commits/conventionalcommits.org):
+2. Commit each logical code change as soon as it is verified, including corresponding tests. Use [Conventional Commits](https://github.com/conventional-commits/conventionalcommits.org) (or run `.\scripts\commit_changes.ps1`):
    - `feat(scope): add feature description`
    - `fix(scope): resolve issue description`
    - `test(scope): add integration or unit test`
    - `docs(scope): update documentation or specification`
-3. Push the branch and open a pull request targeting `main`. Describe the change, enumerate the verification tests executed, and reference the corresponding PRD requirement (e.g. `FR-09`, `DEC-P02`, `AT-P02-01`).
+3. Push the branch and open a pull request targeting `main` using the PR creator:
+   ```bash
+   .\scripts\create_pr.ps1
+   # or bash: ./scripts/create_pr.sh
+   ```
+   Describe the change, enumerate the verification tests executed, and reference the corresponding PRD requirement (e.g. `FR-09`, `DEC-P02`, `AT-P02-01`).
 
 ---
 
