@@ -1,0 +1,55 @@
+name: Scaffold quality
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  scaffold:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nolen
+          POSTGRES_PASSWORD: nolen_ci
+          POSTGRES_DB: nolen_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U nolen -d nolen_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: servers
+    env:
+      DATABASE_URL: postgresql://nolen:nolen_ci@127.0.0.1:5432/nolen_test
+      EXECUTION_MODE: REPLAY
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+          run_install: false
+      - run: pnpm install --frozen-lockfile
+      - name: QG-CODE lint
+        run: pnpm lint
+      - name: QG-CODE typecheck source and tests
+        run: pnpm typecheck
+      - name: QG-CODE build
+        run: pnpm build
+      - name: QG-DOMAIN existing scaffold only
+        run: pnpm test
+      - name: QG-ARCH negative fixtures and empty-suite discovery
+        run: pnpm test:guardrails
+      - name: QG-EVIDENCE validator fixtures
+        run: pnpm test:evidence
+      - name: QG-EVIDENCE documents
+        run: pnpm check:evidence
+      - name: QG-INTEGRATION PostgreSQL 16 connectivity only
+        run: pnpm test:integration
+      - name: Evidence scope
+        if: always()
+        run: |
+          echo 'Scaffold checks only. Finance, jobs, provider invariants and client runtime boundaries: NOT_IMPLEMENTED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'See step results; skipped checks are not PASS. This workflow does not assert G0–G5 release acceptance or branch-protection enforcement.' >> "$GITHUB_STEP_SUMMARY"

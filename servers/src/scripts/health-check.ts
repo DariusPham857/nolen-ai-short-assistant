@@ -42,7 +42,8 @@ async function run() {
     const result = await db.execute(
       sql`SELECT version() as version`,
     );
-    const version = (result as any)[0]?.version ?? "unknown";
+    const version = result[0]?.version;
+    if (typeof version !== "string") throw new Error("Invalid database version response");
     check("PostgreSQL", "pass", version.split(",")[0]);
   } catch (err) {
     check(

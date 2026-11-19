@@ -14,6 +14,7 @@
 import "dotenv/config";
 import PgBoss from "pg-boss";
 import { getEnv } from "../config/env.js";
+import { shutdownHandler } from "./shutdown.js";
 
 const env = getEnv();
 
@@ -43,11 +44,14 @@ async function startWorker() {
   console.log("[worker] Ready and waiting for jobs.");
 
   // Graceful shutdown
-  const shutdown = async () => {
+  const shutdown = shutdownHandler(async () => {
     console.log("[worker] Shutting down...");
     await boss.stop({ graceful: true, timeout: 30_000 });
     process.exit(0);
-  };
+  }, (error: unknown) => {
+    console.error("[worker] Shutdown failed:", error);
+    process.exit(1);
+  });
 
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
