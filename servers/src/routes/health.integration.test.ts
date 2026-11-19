@@ -16,4 +16,3 @@ it("connects to real PostgreSQL 16 and reports ready", async () => {
   const body: unknown = await response.json();
   expect(body).toEqual({ status: "ready", timestamp: timestampMatcher, checks: { database: "connected" } });
 });
-

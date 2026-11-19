@@ -1,6 +1,6 @@
 # ENG-DEC-001 implementation
 
-Status: IN_PROGRESS
+Status: DONE
 Source: [accepted decision](../../docs/development/ENG-DEC-001.md)
 
 ## Goal

@@ -1,6 +1,6 @@
 # ENG-DEC-001 tasks and handoff
 
-Status: IN_PROGRESS
+Status: DONE
 Source: [spec](spec.md)
 
 ## Tasks
@@ -104,3 +104,29 @@ table and specs index. They change workflow only, with no product API exports.
 - No finance/queue/recovery/SSRF feature or API contract implemented; no accepted exceptions.
 - Rollback: revert this increment's commits; no DB migrations or financial writes.
 - Next product task: resolve Film Creation contracts, then approve its implementation plan.
+
+### Final gate evidence — 2026-11-19
+
+[Independent Ubuntu CI](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44552560987)
+on d40d36ce31deffe9b9eb4df1b6e7b673a2a6241f: completed SUCCESS after the fixture repair.
+This supersedes the failed initial run, whose evidence remains recorded above.
+
+| Check | Status | Executed scope |
+|---|---|---|
+| Fresh install | PASS | main and candidate Windows clones; Ubuntu CI frozen lockfile |
+| QG-CODE | PASS | lint, source/test typecheck, build |
+| QG-ARCH | PASS | static server rules + positive/negative fixtures, including CI mode |
+| QG-DOMAIN existing | PASS | environment configuration + health/shutdown unit tests, 8 total |
+| QG-DOMAIN future | NOT_IMPLEMENTED | finance, jobs, provider and continuity invariants |
+| QG-INTEGRATION | PASS | one real PostgreSQL 16 health/connectivity test |
+| Financial concurrency | NOT_IMPLEMENTED | deferred with financial engine |
+| QG-EVIDENCE | PASS | 4 fixture tests, 17 engineering documents |
+| Frontend runtime boundaries | NOT_IMPLEMENTED | no frontend yet; fixture coverage is not app proof |
+| Release G0–G5 | NOT_APPLICABLE | scaffold engineering increment, not release acceptance |
+| Required branch checks | BLOCKED | admin enforcement not verified; PR remains draft for owner review |
+
+T1–T6 are complete within approved scope. No outstanding implementation BLOCK or
+accepted CONTAIN. Branch-policy administration and Film contracts are outside this
+increment and must not be inferred from CI success. No product API/schema migration.
+Final handoff update only changes evidence/status and removes one trailing blank
+line; application and validator behavior remains the CI-tested candidate.
