@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ESLint } from 'eslint';
 import tseslint from 'typescript-eslint';
 import { spawnSync } from 'node:child_process';
-import { boundaries } from '../eslint.config.mjs';
+import config, { boundaries } from '../eslint.config.mjs';
 
 const imports = new ESLint({ overrideConfigFile: true, overrideConfig: [
   { files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser } }, ...boundaries,
@@ -23,10 +23,18 @@ test('UI and domain boundaries catch forbidden imports but allow contracts', asy
 });
 
 test('typed lint catches unsafe assignment, suppression and floating promise', async () => {
-  const eslint = new ESLint();
-  const [positive] = await eslint.lintText('const value: unknown = JSON.parse("{}");\nvoid value;', { filePath: 'src/app.ts' });
+  // Real files avoid CI single-run TypeScript programs using app.ts's on-disk types
+  // for unrelated lintText snippets. Reuse the exact production safety rules.
+  const typed = config.find(entry => entry.plugins?.['@typescript-eslint']);
+  const eslint = new ESLint({ overrideConfigFile: true, overrideConfig: [{
+    ...typed, files: ['scripts/fixtures/typed/*.ts'],
+    languageOptions: { ...typed.languageOptions, parserOptions: {
+      project: './scripts/fixtures/typed/tsconfig.json', tsconfigRootDir: process.cwd(),
+    } },
+  }] });
+  const [positive] = await eslint.lintFiles(['scripts/fixtures/typed/valid.ts']);
   assert.equal(positive.errorCount, 0);
-  const [negative] = await eslint.lintText('const value = JSON.parse("{}");\n// @ts-ignore\nPromise.resolve(value);', { filePath: 'src/app.ts' });
+  const [negative] = await eslint.lintFiles(['scripts/fixtures/typed/invalid.ts']);
   for (const id of ['no-unsafe-assignment','ban-ts-comment','no-floating-promises']) {
     assert.ok(negative.messages.some(m => m.ruleId === `@typescript-eslint/${id}`), id);
   }

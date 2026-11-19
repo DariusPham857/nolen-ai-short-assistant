@@ -81,3 +81,26 @@ table and specs index. They change workflow only, with no product API exports.
   container nolen-eng-dec-001-pg16 on localhost:55432. No application database used.
 - Fresh main clone in temporary directory: frozen install PASS, typecheck PASS, baseline 5 tests PASS.
 - Next: [CI workflow](../../.github/workflows/quality.yml), fresh candidate install, read-only review.
+
+### T4D CI fixture correction
+- Fresh candidate ae5c6d8: frozen install and all eight commands in verification.md PASS locally.
+- [First CI run](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44552030627):
+  lint/typecheck/build/unit PASS; guardrail fixture FAIL; downstream checks skipped, not PASS.
+- Reproduced locally with `CI=true node --test scripts/check-guardrails.test.mjs`:
+  no-floating-promises assertion failed. CI single-run type programs used on-disk
+  app.ts information for synthetic lintText snippets.
+- Replaced those snippets with actual [valid](../../servers/scripts/fixtures/typed/valid.ts)
+  and [invalid](../../servers/scripts/fixtures/typed/invalid.ts) files in a small
+  [fixture TS project](../../servers/scripts/fixtures/typed/tsconfig.json).
+  Same production rules and all assertions retained; no suppression in application code.
+- Same CI=true command after repair: PASS, 3/3. Next: rerun independent CI.
+
+### T6 read-only review
+- Author performed a separate read-only pass over rules, diff, callers, fixtures,
+  and evidence. This is not an independent second-engineer approval.
+- No remaining BLOCK found in reviewed implementation; CI completion pending.
+- Limits: import checks are scoped static rules, not a graph/security analyzer;
+  docs validator checks structure/file links, not source semantics or human approval.
+- No finance/queue/recovery/SSRF feature or API contract implemented; no accepted exceptions.
+- Rollback: revert this increment's commits; no DB migrations or financial writes.
+- Next product task: resolve Film Creation contracts, then approve its implementation plan.
