@@ -1,0 +1,3 @@
+-- Placeholder for first migration.
+-- Run `pnpm db:generate` to auto-generate migrations from the Drizzle schema.
+-- This file exists so the migrations directory is tracked by Git.
