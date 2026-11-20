@@ -9,6 +9,7 @@ import path from "path";
 export default defineConfig({
   test: {
     globals: true,
+    fileParallelism: false,
     environment: "node",
     include: ["src/**/*.integration.test.ts"],
     testTimeout: 30_000,

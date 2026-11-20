@@ -20,10 +20,16 @@ pnpm --dir servers test:integration
 ```
 
 Integration requires DATABASE_URL pointing to a disposable PostgreSQL 16 database.
-CI provides a service; local tests must not point to production. No schema writes
-are needed for this health-only test. PostgreSQL unavailable means BLOCKED, not PASS.
+CI provides a service; local tests must not point to production. The health test
+only reads; Film/Story integration suites perform schema/data writes and create
+test-owned disposable databases. Run integration files serially because security
+negative cases temporarily rename the session table. PostgreSQL unavailable means BLOCKED, not PASS.
 Unit health tests mock connectivity; financial concurrency tests remain NOT_IMPLEMENTED.
 FC-001 integration additionally verifies Film/session/migration behavior on PG16.
+SP-001 adds snapshot concurrency/receipts, Bible dependencies, continuity/waivers,
+approval evidence, same-Film FKs and application guard-trigger drift. Browser
+tests cover canonical fixture approval, history and uncertain retries; fixtures
+do not prove LIVE planning. VIDEO_DISPATCH and financial invariants remain NOT_IMPLEMENTED.
 
 ESLint rules use [typed linting](https://typescript-eslint.io/getting-started/typed-linting/)
 and [restricted imports](https://eslint.org/docs/latest/rules/no-restricted-imports).

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export * from './story.js';
 
 export const MAX_MICROS = '9223372036854775807';
 export const microsSchema = z.string().regex(/^(0|[1-9]\d*)$/).refine(
@@ -22,7 +23,7 @@ export function normalizeFilm(input: unknown): CreateFilm {
 }
 
 export const filmDtoSchema = createFilmSchema.extend({
-  id: z.string().uuid(), status: z.literal('DRAFT'), activeStoryRevisionId: z.null(),
+  id: z.string().uuid(), status: z.enum(['DRAFT','PLANNING','IN_PRODUCTION','COMPLETED','ARCHIVED']), activeStoryRevisionId: z.string().uuid().nullable(),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type FilmDto = z.infer<typeof filmDtoSchema>;

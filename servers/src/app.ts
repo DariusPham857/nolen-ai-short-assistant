@@ -12,24 +12,15 @@ import { createFilmApi } from "./http/film-api.js";
  *   /api/shots   — shot management (EP-01, future)
  *   /api/ledger  — cost ledger queries (EP-02, future)
  */
+import { installBoundary } from './http/boundary.js';
+import { createStoryApi } from './http/story-api.js';
 export const app = new Hono();
+installBoundary(app);
 
 // ── Middleware ───────────────────────────────────────────
 app.use("*", logger());
 app.route("/", createFilmApi());
+app.route("/", createStoryApi());
 
 // ── Routes ──────────────────────────────────────────────
 app.route("/api/health", healthRoutes);
-
-// ── Fallback ────────────────────────────────────────────
-app.notFound((c) =>
-  c.json({ error: "Not Found", path: c.req.path }, 404),
-);
-
-app.onError((err, c) => {
-  console.error('[server] unhandled request failure');
-  return c.json(
-    { error: { code: "INTERNAL_ERROR", message: "Request failed" } },
-    500,
-  );
-});

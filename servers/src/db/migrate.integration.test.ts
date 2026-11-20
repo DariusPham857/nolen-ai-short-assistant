@@ -22,8 +22,44 @@ it('migrates fresh database and accepts a complete valid journal repeatedly', as
   await withDatabase(async (url, client) => {
     await migrateDatabase(url);
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(1);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(2);
     expect(await client`SELECT * FROM films`).toHaveLength(0);
+  });
+});
+
+it('SP guard trigger/function drift blocks migration before any repair',async()=>{
+  for(const mutation of ['ALTER TABLE shot_revisions DISABLE TRIGGER sp_shot_revisions_immutable','DROP TRIGGER sp_shot_revisions_immutable ON shot_revisions',"CREATE OR REPLACE FUNCTION sp_guard_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"]){
+    await withDatabase(async(url,client)=>{
+      await migrateDatabase(url);await client.unsafe(mutation);
+      await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');
+      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(2);
+    });
+  }
+});
+
+it('upgrades an FC-only database without changing the original Film DTO or timestamps; unsupported data rolls back',async()=>{
+  const folder=mkdtempSync(path.join(tmpdir(),'fc-prefix-'));
+  cpSync(migrationFolder,folder,{recursive:true});
+  const journalFile=path.join(folder,'meta/_journal.json');
+  const journal=JSON.parse(readFileSync(journalFile,'utf8')) as {entries:unknown[]};
+  journal.entries=journal.entries.slice(0,1);writeFileSync(journalFile,JSON.stringify(journal));
+  await withDatabase(async(url,client)=>{
+    await migrateDatabase(url,folder);const id=randomUUID();
+    await client`INSERT INTO films(id,title,brief,operator_id,idempotency_key,request_hash) VALUES(${id},'Legacy','Preserve me','local-operator',${randomUUID()},'legacy')`;
+    const [before]=await client`SELECT * FROM films WHERE id=${id}`;
+    await migrateDatabase(url);
+    const [after]=await client`SELECT * FROM films WHERE id=${id}`;
+    expect(after.created_at).toEqual(before.created_at);expect(after.updated_at).toEqual(before.updated_at);
+    expect(after.create_receipt).toMatchObject({id,title:'Legacy',status:'DRAFT',activeStoryRevisionId:null});
+    await migrateDatabase(url);
+  });
+  await withDatabase(async(url,client)=>{
+    await migrateDatabase(url,folder);
+    await client`INSERT INTO films(title,brief,status,operator_id,idempotency_key,request_hash) VALUES('Unsupported','Preserve me','PLANNING','local-operator',${randomUUID()},'legacy')`;
+    await expect(migrateDatabase(url)).rejects.toThrow();
+    expect((await client`SELECT to_regclass('public.story_revisions') AS name`)[0].name).toBeNull();
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(1);
+    expect((await client`SELECT title FROM films`)[0].title).toBe('Unsupported');
   });
 });
 

@@ -55,7 +55,8 @@ jobs:
       - name: Evidence scope
         if: always()
         run: |
-          echo 'FC-001 create/read only. Finance, generation/jobs, continuity and media: NOT_IMPLEMENTED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'FC-001 create/read and SP-001 fixture/manual Story Approval checks. See individual step results.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'LIVE planning, finance, generation/jobs, VIDEO_DISPATCH validation and media: NOT_IMPLEMENTED.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Missing/skipped checks are not PASS; no G0–G5 release acceptance or branch protection claimed.' >> "$GITHUB_STEP_SUMMARY"
   compose:
     runs-on: ubuntu-latest

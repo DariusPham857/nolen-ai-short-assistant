@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { normalizeFilm, type CreateFilm, type FilmDto } from '@nolen/contracts';
+import { normalizeFilm, filmDtoSchema, type CreateFilm, type FilmDto } from '@nolen/contracts';
 import { db } from '../db/index.js';
 import { films, type Film } from '../db/schema/films.js';
 
 /** Convert persisted bigint into the explicit browser-safe DTO; internal fields stay private. */
 export function filmDto(row: Film): FilmDto {
-  if (row.status !== 'DRAFT' || row.aspectRatio !== '9:16' || row.activeStoryRevisionId !== null) {
+  if (row.aspectRatio !== '9:16') {
     throw new Error('Film outside FC-001 contract');
   }
   return { id: row.id, title: row.title, brief: row.brief, budgetLimitUsdMicros: row.budgetLimitUsdMicros.toString(),
@@ -29,11 +29,15 @@ export async function createFilm(input: CreateFilm, key: string, operatorId: str
     const [inserted] = await tx.insert(films).values({ ...input,
       budgetLimitUsdMicros: BigInt(input.budgetLimitUsdMicros), operatorId, idempotencyKey: key, requestHash: hash,
     }).onConflictDoNothing({ target: [films.operatorId, films.idempotencyKey] }).returning();
-    if (inserted) return filmDto(inserted);
+    if (inserted) {
+      const receipt=filmDto(inserted);
+      await tx.update(films).set({createReceipt:receipt}).where(eq(films.id,inserted.id));
+      return receipt;
+    }
     const [existing] = await tx.select().from(films).where(and(eq(films.operatorId, operatorId), eq(films.idempotencyKey, key)));
     if (!existing) throw new Error('Idempotency row unavailable');
     if (existing.requestHash !== hash) throw new IdempotencyConflict();
-    return filmDto(existing);
+    return filmDtoSchema.parse(existing.createReceipt);
   }, { isolationLevel: 'read committed' });
 }
 

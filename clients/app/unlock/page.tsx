@@ -13,7 +13,7 @@ export default function Unlock() {
         if(!response.ok){setError(await errorMessage(response));return;}
         setToken('');
         const next=new URLSearchParams(window.location.search).get('next');
-        router.push(next && /^\/films\/(new|[0-9a-f-]+\/brief)$/.test(next)?next:'/films/new');
+        router.push(next && /^\/films\/(new|[0-9a-f-]+\/(brief|storyboard))$/.test(next)?next:'/films/new');
       } catch {setError('Unable to reach the local server. Try again.');} finally {setBusy(false);}
     })();}}>
       <div><label htmlFor="token">Operator token</label><input id="token" type="password" autoComplete="off" required value={token} onChange={e=>setToken(e.target.value)} disabled={busy}/></div>

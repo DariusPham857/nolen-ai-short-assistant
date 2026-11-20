@@ -6,11 +6,11 @@ const providers = ['@google/**', '@runwayml/**', '@fal-ai/**', '**/providers/ada
 /** Import rules are shared with architecture fixtures; no custom analyzer. */
 export const boundaries = [
   {
-    files: ['src/domain/**/*.ts', 'src/**/domain/**/*.ts', 'src/routes/**/*.ts'],
+    files: ['src/domain/**/*.ts', 'src/**/domain/**/*.ts', 'src/**/domain.ts', 'src/routes/**/*.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: providers }] },
   },
   {
-    files: ['src/domain/**/*.ts', 'src/**/domain/**/*.ts'],
+    files: ['src/domain/**/*.ts', 'src/**/domain/**/*.ts', 'src/**/domain.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...providers, 'hono', 'hono/**', '@hono/**'] }] },
   },
   {
