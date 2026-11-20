@@ -32,3 +32,11 @@ it('invalid references fail structural validation; duration errors cannot be wai
   c.scenes[0].shots[0].spec.durationSeconds=60;
   expect(validate(c,45).find(f=>f.code==='DURATION_RANGE')?.waivable).toBe(false);
 });
+
+it('recurring-character style identity cannot be waived or bypassed by an OPTIONAL keyframe override',()=>{
+  const c=canonicalStory();c.storyBible.styleRefs.push({id:'different',name:'Different',description:'A different visual identity'});
+  c.scenes[0].shots[1].spec.styleRefId='different';c.scenes[0].shots[1].spec.keyframeOverride={requirement:'OPTIONAL',reason:'Producer accepts keyframe risk',riskAcknowledged:true};
+  expect(validate(c,45).some(f=>f.code==='IDENTITY_LOCK'&&!f.waivable)).toBe(true);
+  const broll=structuredClone(c.scenes[0].shots[0].spec);broll.subjectIds=[];broll.continuity.start.characterStates=[];broll.continuity.end.characterStates=[];broll.continuity.start.propIds=[];broll.continuity.end.propIds=[];
+  expect(policy(broll,c).effectiveRequirement).toBe('OPTIONAL');broll.shotType='OTHER';expect(policy(broll,c).riskFlags).toContain('UNKNOWN_RISK');
+});

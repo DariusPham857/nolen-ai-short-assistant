@@ -31,7 +31,7 @@ No finance/provider/queue/SSRF implementation. G2–G5 NOT_IMPLEMENTED.
 - Tests: [domain](../../servers/src/stories/domain.test.ts), [Story PG16](../../servers/src/stories/story.integration.test.ts), [migration PG16](../../servers/src/db/migrate.integration.test.ts), retained FC/session/health regression suites.
 
 Mapping: FR-02/03/11 and scoped FR-14; DEC-P01/03/04. Existing C4 web/API/database topology retained; no container/service architecture change.
-Evidence: Windows, Node 22.23.0, pnpm 11.21.0, Docker PostgreSQL 16 test container at loopback port 55432. `pnpm test` PASS (3 contracts + 14 server unit tests); `pnpm lint`, `pnpm typecheck`, `pnpm build` PASS. `pnpm test:integration` PASS (20 tests, 4 files). `pnpm test:guardrails` PASS (4 negative/positive checks), `pnpm test:evidence` PASS (4 validator tests). Local evidence commands are not remote CI evidence.
+Evidence: Windows, Node 22.23.0, pnpm 11.21.0, Docker PostgreSQL 16 test container at loopback port 55432. `pnpm test` PASS (3 contracts + 15 server unit tests); `pnpm lint`, `pnpm typecheck`, `pnpm build` PASS. `pnpm test:integration` PASS (21 tests, 4 files). `pnpm test:guardrails` PASS (4 negative/positive checks), `pnpm test:evidence` PASS (4 validator tests). Local evidence commands are not remote CI evidence.
 
 Source reconciliation: specs/spec.md → story-planning/spec.md (existing user text preserved and amended with owner-approved v1.1); PRD pilot 16:9 proposal → 9:16 (SP-D01). No new competing rule registry; other canonical rules unchanged.
 Failures fixed with evidence: waiver timestamp decoding (driver string rather than Date), JSONB receipt key-order comparison, explicit textarea label association. Browser setup respects the production login cooldown and reuses one UI-issued session; limiter unchanged.
@@ -40,7 +40,7 @@ Next: complete SP-06–SP-08 browser/Compose checks, read-only review and publis
 ### SP-06–SP-07 registered files and evidence
 - [Storyboard](../../clients/components/storyboard.tsx) exports StoryboardWorkspace; Film route mounts it, Brief links to it and unlock redirect permits the protected Storyboard destination. Three-pane zinc/amber editor supports script/Bible/ShotSpec, continuity, keyframe override/transition reasons, accessible reorder, duplicate/remove/move and read-only history.
 - [browser suite](../../tests/e2e/story.spec.ts): canonical 45s/eight-shot approve/reload, fork/history, mobile controls, lost-response same-key retry, and stale save preserving tab-local draft. Existing FC browser cases retained.
-- `pnpm test:e2e`: PASS, 9 tests (6 FC + 3 Story) against production Next/Hono and PG16. `pnpm --filter @nolen/web test:boundary`: PASS, missing runtime secret and indirect server-only negative build.
+- `pnpm test:e2e`: PASS, 10 tests (6 FC + 4 Story) against production Next/Hono and PG16. `pnpm --filter @nolen/web test:boundary`: PASS, missing runtime secret and indirect server-only negative build.
 - Visual inspection: desktop and 390px browser screenshots generated under test-results; no fake media or financial counters. Artifacts are ignored locally and uploaded by CI.
 - Domain file import restriction now includes stories/domain.ts, with direct positive/negative fixtures for its actual path.
 
@@ -54,10 +54,22 @@ Use existing FC runbook/toolchain. `pnpm db:migrate` upgrades supported FC rows 
 ### SP-08 acceptance and review handoff
 - Backend implementation commit: `8f709ee`; UI/evidence commit follows it. Checks were executed against this complete working tree, including the UI changes.
 - Compose: `docker compose -p sp001-review up --build --detach --wait --wait-timeout 180` PASS (frozen lockfile install and production Linux build); `COMPOSE_PROJECT_NAME=sp001-review node scripts/compose-smoke.mjs` PASS. Migration completed before web/worker; only web port 127.0.0.1:3000 published, worker stopped before Film/Story creation/approval, approval and original Film persist through real web restart, logout remains revoked through restart.
-- QG-CODE PASS: lint, typecheck and build. QG-ARCH PASS: 4 guardrail tests plus 2 runtime/server-only tests. QG-DOMAIN PASS only for implemented G1 rules (17 combined contract/server unit tests). QG-INTEGRATION PASS: 20 PG16 tests and 9 production browser tests, plus Compose smoke. QG-EVIDENCE PASS: 4 evidence-validator tests and documentation links/structure checks.
+- QG-CODE PASS: lint, typecheck and build. QG-ARCH PASS: 4 guardrail tests plus 2 runtime/server-only tests. QG-DOMAIN PASS only for implemented G1 rules (18 combined contract/server unit tests). QG-INTEGRATION PASS: 21 PG16 tests and 10 production browser tests, plus Compose smoke. QG-EVIDENCE PASS: 4 evidence-validator tests and documentation links/structure checks.
 - NOT_IMPLEMENTED: paid LIVE planning, VIDEO_DISPATCH validation, financial admission/ledger, provider/jobs, media/export and G2–G5 release acceptance. No provider keys/calls required.
 - Read-only implementer review traced spec → contracts → API/auth → Film lock/receipts → snapshot/validation/approval → UI/retry and checked changed callers/tests. Findings fixed: waiver timestamp shape, canonical JSONB receipt comparison, textarea labeling, URL ID errors and actual stories/domain.ts import-restriction coverage. No remaining observed BLOCK or accepted CONTAIN exception; debt tracker unchanged.
 - Independent reviewer and owner G1 sign-off have NOT been supplied. Local CI-equivalent PASS does not substitute for them or for branch protection. Feature is ready for PR review, not marked DONE or merged.
 - Next dependency: review/accept SP-001, then plan the next approved generation/accounting slice; do not start deferred spikes automatically.
 
-Acceptance mapping: AT-SP-01–07/20–21 persistence/history/ownership/concurrency and FC receipts → Story/Film PG16 suites; AT-SP-08–18/22–24 schemas, rules, policies, lifecycle, waivers, fixtures and duration → contract/domain/Story PG16 suites; AT-SP-19 → canonical REQUIRED-without-asset approval; AT-SP-25–26 → browser uncertain retry/mobile plus security tests. AT-SP-27 → migration trigger/function drift; AT-SP-28 → identity dependency test; AT-SP-29 → edit/approval and waiver race tests; AT-SP-30 → shared-boundary direct Hono and browser regression. This mapping describes test scope, not independent acceptance of every product requirement.
+Acceptance mapping (implemented evidence, independent acceptance still pending):
+- AT-SP-01–08: snapshot/history, duplicate/remove/reorder, concurrency, ownership and invalid inputs → Story PG16 + browser suites.
+- AT-SP-09–15: recurring identity-style lock, wardrobe/held-prop, location/light/pose, explicit transitions, bounded waivers and policy/override behavior → domain tests + Story PG16. An OPTIONAL override cannot bypass IDENTITY_LOCK.
+- AT-SP-16–19: lifecycle/races, edit-after-approval history and REQUIRED keyframe without asset → PG16 + canonical browser approval.
+- AT-SP-20–21: original Film receipt and FC-only migration compatibility → Film/Story/migration PG16 suites.
+- AT-SP-22: fixture provenance API and shared strict schema/reference rejection; no LIVE inference claim.
+- AT-SP-23–24: connection loss and explicit 5xx after Story commit, same-key replay, stale draft retention, keyboard reorder and 390px layout → production browser suite.
+- AT-SP-25–26: target warning/range block and Host/Origin/size/session DB failures → domain + PG16 + retained FC browser checks.
+- AT-SP-27: migration trigger/function drift; AT-SP-28: Bible identity dependency invalidation; AT-SP-29: edit/approval/waiver races; AT-SP-30: shared-boundary Hono/browser regression.
+This mapping describes automated test scope, not independent acceptance of every product requirement.
+
+Final review correction: recurring characters changing locked style now produce non-waivable IDENTITY_LOCK. Added tests prove a keyframe override cannot bypass it and that duplicate/remove preserves stable-ID history. Validation evidence checks persisted findings against authoritative recomputation before binding its ID to approval. A validation behavior change after release must bump the rule-set version; same-version evidence mismatch fails closed.
+Execution notes: initial sandbox network/artifact permissions required approved reruns with the same toolchain. A browser run was blocked by the test Compose project occupying port 3000; only that test project was stopped before rerunning. These were environment/test setup failures, not hidden source regressions or accepted product workarounds.

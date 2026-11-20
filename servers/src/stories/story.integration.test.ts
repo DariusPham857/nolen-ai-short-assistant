@@ -135,3 +135,17 @@ it('foreign ShotRevision membership is rejected by FK; invalid references and bl
   const invalid=await setup(long);let r=await transition(invalid.film.id,invalid.r,'mark-planned');r=await transition(invalid.film.id,r,'submit-review');
   expect((await request(invalid.film.id,'storyboard/approve',expected(r))).status).toBe(422);
 });
+
+it('duplicate gets a new stable Shot ID; removal preserves history; identity lock blocks approval',async()=>{
+  const {film,r}=await setup();const c=successor(r);const original=c.scenes[0].shots[0];
+  c.scenes[0].shots.push({clientRef:'duplicate',spec:structuredClone(original.spec)});
+  expect((await request(film.id,'storyboard/revisions',{...expected(r),content:c})).status).toBe(201);
+  let current=(await read(film.id)).active!;const copy=current.content.scenes[0].shots[8];
+  expect(Object.keys(r.shotRevisions)).not.toContain(copy.id);
+  const removed=successor(current);removed.scenes[0].shots.shift();removed.storyBible.styleRefs.push({id:'alternate',name:'Alternate',description:'Different visual identity'});removed.scenes[0].shots[0].spec.styleRefId='alternate';
+  expect((await request(film.id,'storyboard/revisions',{...expected(current),content:removed})).status).toBe(201);
+  current=(await read(film.id)).active!;expect(current.shotRevisions[original.id!]).toBeUndefined();expect((await read(film.id,r.id)).revision?.shotRevisions[original.id!]).toBeDefined();
+  current=await transition(film.id,current,'mark-planned');current=await transition(film.id,current,'submit-review');
+  const approval=await request(film.id,'storyboard/approve',expected(current));expect(approval.status).toBe(422);
+  expect(await approval.text()).toContain('IDENTITY_LOCK');
+});

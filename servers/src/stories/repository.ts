@@ -30,7 +30,8 @@ async function validation(tx:Tx,r:StorySnapshot,target:number):Promise<Validatio
   await tx`INSERT INTO story_validations(id,story_revision_id,context,dependency_hash,rule_set_version,findings)
     VALUES(${randomUUID()},${r.id},'STORY_APPROVAL',${dependencyHash},${RULESET},${JSON.stringify(findings)}::jsonb)
     ON CONFLICT(story_revision_id,context,dependency_hash,rule_set_version) DO NOTHING`;
-  const [row]=await tx<{id:string}[]>`SELECT id FROM story_validations WHERE story_revision_id=${r.id} AND context='STORY_APPROVAL' AND dependency_hash=${dependencyHash} AND rule_set_version=${RULESET}`;
+  const [row]=await tx<{id:string;findings:unknown}[]>`SELECT id,findings FROM story_validations WHERE story_revision_id=${r.id} AND context='STORY_APPROVAL' AND dependency_hash=${dependencyHash} AND rule_set_version=${RULESET}`;
+  if(hash(row.findings)!==hash(findings))throw new ApiFailure(409,'VALIDATION_RULESET_MISMATCH','Validation behavior changed without a new rule-set version');
   return {id:row.id,context:'STORY_APPROVAL',dependencyHash,ruleSetVersion:RULESET,findings};
 }
 /** Shared transaction boundary for Story writes; replay precedes optimistic preconditions. */

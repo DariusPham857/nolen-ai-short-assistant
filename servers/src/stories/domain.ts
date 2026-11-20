@@ -63,6 +63,7 @@ export function validate(content:StoryContent,target:number):Finding[] {
   else if(duration!==target)add('TARGET_DURATION','duration',`Total ${duration}s differs from target ${target}s`,false,'WARNING');
   for(let i=1;i<shots.length;i++){
     const previous=shots[i-1].spec.continuity.end;const next=shots[i].spec.continuity.start;
+    if(shots[i-1].spec.styleRefId!==shots[i].spec.styleRefId && previous.characterStates.some(c=>next.characterStates.some(n=>n.characterId===c.characterId)))add('IDENTITY_LOCK',`shots.${i}.styleRefId`,'A recurring character must retain the locked visual identity style');
     const transitions=shots[i].spec.intendedTransitions;
     const compare=(field:'wardrobe'|'heldProps'|'pose'|'location'|'lighting'|'props',a:unknown,b:unknown,waivable=false,suffix='')=>{
       if(canonical(a)!==canonical(b) && !transitions.some(t=>t.field===field))add(field==='wardrobe'||field==='heldProps'?'WARDROBE_PROP':field==='pose'?'TEMPORAL_STATE':'LOCATION_LIGHTING',`shots.${i}.continuity.${field}${suffix}`,`${field} differs across shot ${i} → ${i+1}${suffix}`,waivable);

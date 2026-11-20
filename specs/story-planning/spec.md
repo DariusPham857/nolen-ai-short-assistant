@@ -198,11 +198,11 @@ The following are **planned tests, not executed PASS evidence**. Record command,
 
 **Mandatory evidence:** Zod/continuity/policy deterministic unit tests; PostgreSQL 16 migrations, FKs, transactions, 20-way stale/concurrent test as feasible; Next/Hono/real DB Playwright create/edit/approve/reload; negative import boundaries; clean `pnpm install --frozen-lockfile`, lint/typecheck/build, docs validators and CI. `test:e2e` must not use mock persistence as proof. No paid provider calls in CI. Recheck FC-001 regression suite after Film DTO and migration changes.
 
-## 11. Open questions / blocking contracts for owner approval
+## 11. Decision history — resolved by owner approval
 
 | ID | Status | Decision required / recommendation | Blocks |
 |---|---|---|---|
-| `SP-D01` | **RESOLVED — see approved v1.1 contracts** | **Canonical film mismatch:** PRD §29.2 pilot specifies 45 s / 8 shots **16:9**, while FC-001 and AGENTS require **9:16**. **Recommend 9:16** for the pilot and explicitly amend the pilot package before G1 freeze. Do not silently reinterpret §29.2. | Canonical G1 fixture/sign-off |
+| `SP-D01` | **RESOLVED — see approved v1.1 contracts** | **Canonical film:** initial PRD pilot proposed 16:9; owner chose 45s / eight shots / 9:16. PRD §29.2 has been explicitly aligned to this choice. | Canonical G1 fixture/sign-off |
 | `SP-D02` | **RESOLVED — see approved v1.1 contracts** | **G1 completion:** PRD §30.3 requires approved canonical 45s/8-shot (or compliant 30–60s) story. **Recommend** 3-shot fixture for fast tests only, 8-shot/45s as acceptance evidence; not interchangeable. | G1 evidence |
 | `SP-D03` | **RESOLVED — see approved v1.1 contracts** | **API write granularity:** full-snapshot successor endpoint (§6) vs PRD §21.7 granular Scene/Shot routes. **Recommend full snapshot** for demo-sized storyboard; approve names, limits, idempotency receipt. | API/UX implementation |
 | `SP-D04` | **RESOLVED — see approved v1.1 contracts** | **Schema freeze:** IDs, JSON shape/bounds, `StoryBible`/ShotSpec schema version, immutable content vs lifecycle metadata, approval event representation and FK strategy. **Recommend PRD §19.4/§21.2 semantics** without premature extra tables. | Contracts/migrations |
@@ -264,3 +264,5 @@ No remaining implementation contract decisions. VIDEO_DISPATCH, paid inference a
 Story input is `{expectedStoryRevisionId, expectedStateVersion, content:{script,storyBible,scenes}}`. Existing shots carry `id` and `expectedShotRevisionId`; new scenes/shots carry unique `clientRef`, with IDs assigned by the server. Server strips optimistic Shot tokens from persisted creative content.
 Bounds: 1–10 nonempty scenes, at most ten total shots, shot durations integer 1–60s, script 20,000 chars, prompt 2,000, negative prompt 1,000, names 255, definition/continuity text 2,000, max 32 definitions per Bible group, keys max 64 chars, JSON request max 512KiB.
 Validation context participates in the evidence unique key. Persisted snapshot reads include scene/shot IDs, derived policies, revision/version tokens, findings, waiver reasons and approval evidence. Fixture proposal provenance is explicitly FIXTURE with liveInference=false; it is not paid provider output.
+
+Story Approval rule clarification: recurring character continuity retains its locked visual identity style. A style-reference change across adjacent appearances produces non-waivable IDENTITY_LOCK; a keyframe override cannot bypass it. Mark-planned/submit-review require valid structure and persist findings for review; only approve requires all ERROR findings resolved by correction, declared valid transitions or eligible waivers. After release, validation behavior changes require a new rule-set version; stored evidence cannot be overwritten under an existing version.

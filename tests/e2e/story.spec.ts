@@ -59,10 +59,19 @@ test('lost response preserves pending key/payload across reload and retry create
 test('stale external write rejects save without losing draft; manual planning, duplicate/remove/reorder controls work',async({page})=>{
   const id=await open(page);await page.getByRole('button',{name:'Start manual plan',exact:true}).click();await save(page);
   await page.getByRole('button',{name:'Duplicate shot',exact:true}).click();await expect(page.getByText('60s · 2 shots · 9:16',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Move shot down',exact:true}).click();await page.getByRole('button',{name:'Remove shot',exact:true}).click();
+  await page.getByRole('button',{name:'Move shot down',exact:true}).focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'Remove shot',exact:true}).click();
   await page.getByLabel('Shot prompt',{exact:true}).fill('Keep my unsaved draft');
   const board=await (await page.request.get(`/api/films/${id}/storyboard`)).json() as Storyboard;
   const external=await page.request.post(`/api/films/${id}/storyboard/revisions`,{headers:{Origin:'http://127.0.0.1:3000','Idempotency-Key':randomUUID()},data:{expectedStoryRevisionId:board.active!.id,expectedStateVersion:board.active!.stateVersion,content:canonicalStory()}});expect(external.status()).toBe(201);
   await page.getByRole('button',{name:'Save new revision',exact:true}).click();await expect(page.getByRole('alert').filter({hasText:'Reload the current storyboard'})).toContainText(/Reload/);
   await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Keep my unsaved draft');await page.reload();await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Keep my unsaved draft');
+});
+
+test('5xx after Story commit retains the same key and payload until a definite replay response',async({page})=>{
+  const id=await open(page);await fixture(page);let key='';
+  await page.route('**/storyboard/revisions',async route=>{key=route.request().headers()['idempotency-key'];const committed=await route.fetch();expect(committed.status()).toBe(201);await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'DATABASE_UNAVAILABLE',message:'Test response lost after commit',requestId:'test-only'}})});});
+  await page.getByRole('button',{name:'Save new revision',exact:true}).click();await expect(page.getByRole('button',{name:'Retry same request',exact:true})).toBeEnabled();
+  await page.unroute('**/storyboard/revisions');let replayKey='';page.on('request',r=>{if(r.url().endsWith('/storyboard/revisions'))replayKey=r.headers()['idempotency-key'];});
+  await page.getByRole('button',{name:'Retry same request',exact:true}).click();await expect(page.getByRole('button',{name:'Validate story',exact:true})).toBeEnabled();expect(replayKey).toBe(key);
+  const board=await(await page.request.get(`/api/films/${id}/storyboard`)).json() as Storyboard;expect(board.history).toHaveLength(1);
 });
