@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import postgres from 'postgres';
 const token='test-only-operator-token-32-bytes-minimum';
 
 /** Use the actual unlock form, never inject authenticated state into the app. */
@@ -16,13 +17,22 @@ async function fill(page:import('@playwright/test').Page,title:string) {
 }
 
 test('unlock, create, reload, logout and copied-cookie replay',async({page,request})=>{
-  await unlock(page);await fill(page,'Persistent Film');
+  await unlock(page);
+  const database=postgres(process.env.DATABASE_URL!,{max:1});
+  await database`ALTER TABLE operator_sessions RENAME TO operator_sessions_unavailable`;
+  try {
+    const unavailable=await page.request.get(`/api/films/${randomUUID()}`);
+    expect(unavailable.status()).toBe(503);
+    expect(await unavailable.text()).toContain('DATABASE_UNAVAILABLE');
+  } finally {await database`ALTER TABLE operator_sessions_unavailable RENAME TO operator_sessions`;await database.end();}
+  await fill(page,'Persistent Film');
   await page.getByRole('button',{name:'Create draft Film'}).click();
   await expect(page).toHaveURL(/\/films\/[0-9a-f-]+\/brief$/);
   await expect(page.getByRole('heading',{name:'Persistent Film'})).toBeVisible();
   await expect(page.getByText('Budget limit: $9007199254.740993')).toBeVisible();
   await page.screenshot({path:test.info().outputPath('film-brief.png'),fullPage:true});
-  const url=page.url(); await page.reload();
+  const url=page.url(); const reloaded=await page.reload();
+  expect(reloaded?.headers()['cache-control']).toContain('no-store');
   await expect(page.getByRole('heading',{name:'Persistent Film'})).toBeVisible();
   const cookies=await page.context().cookies();
   const old=cookies.find(c=>c.name==='nolen_session')!;
@@ -81,4 +91,11 @@ test('definitive validation refusal preserves form values for correction',async(
   await expect(page.getByRole('alert',{name:'Create Film error'})).toContainText('Check');
   await expect(page.getByLabel('Film title')).toHaveValue('Preserved draft');
   await expect(page.getByLabel('Budget limit (USD)')).toHaveValue('9007199254.740993');
+});
+
+test('canonical Host covers pages and cross-origin mutation is rejected before auth',async({request})=>{
+  expect((await request.get('/',{headers:{Host:'localhost:3000'}})).status()).toBe(403);
+  const rejected=await request.post('/api/operator/session',{headers:{Origin:'http://evil.invalid'},data:{token}});
+  expect(rejected.status()).toBe(403);
+  expect(rejected.headers()['set-cookie']).toBeUndefined();
 });

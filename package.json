@@ -2,7 +2,9 @@
   "name": "nolen-ai-short-assistant",
   "private": true,
   "packageManager": "pnpm@11.21.0",
-  "engines": { "node": "22.23.0" },
+  "engines": {
+    "node": "22.23.0"
+  },
   "scripts": {
     "build": "pnpm --filter @nolen/contracts build && pnpm --filter @nolen/server build && pnpm --filter @nolen/web build",
     "typecheck": "pnpm --filter @nolen/contracts build && pnpm -r typecheck",
@@ -15,5 +17,8 @@
     "test:evidence": "node --test scripts/check-evidence.test.mjs",
     "db:migrate": "pnpm --filter @nolen/server db:migrate"
   },
-  "devDependencies": { "@playwright/test": "1.65.1" }
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "postgres": "3.4.9"
+  }
 }

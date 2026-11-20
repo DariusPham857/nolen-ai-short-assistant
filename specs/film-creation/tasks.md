@@ -77,3 +77,78 @@ Next FC-02a and FC-03. No implementation PASS claimed yet.
   overflow at 390px, zinc/amber hierarchy and real money display. Replaced Arial
   fallback with locally bundled Geist Sans/Mono per design tokens; build PASS.
 - Next: independent CI on clean Ubuntu; final browser/Compose acceptance pending.
+
+### File registration (FC-001)
+Source mapping: FR-01/MVP-01 and the approved spec above; topology clarification in C4.
+- [.dockerignore](../../.dockerignore): Reproducible image and private localhost topology/startup order.
+- [.gitattributes](../../.gitattributes): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [.github/workflows/quality.yml](../../.github/workflows/quality.yml): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [.gitignore](../../.gitignore): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/app/api/((...route))/route.ts](../../clients/app/api/[[...route]]/route.ts): Create/read/unlock UI, states and local design-system primitives.
+- [clients/app/films/(id)/brief/page.tsx](../../clients/app/films/[id]/brief/page.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/app/films/new/page.tsx](../../clients/app/films/new/page.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/app/globals.css](../../clients/app/globals.css): Create/read/unlock UI, states and local design-system primitives.
+- [clients/app/layout.tsx](../../clients/app/layout.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/app/page.tsx](../../clients/app/page.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/app/unlock/page.tsx](../../clients/app/unlock/page.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/components/create-film.tsx](../../clients/components/create-film.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/components/navigation.tsx](../../clients/components/navigation.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/components/ui/button.tsx](../../clients/components/ui/button.tsx): Create/read/unlock UI, states and local design-system primitives.
+- [clients/eslint.config.mjs](../../clients/eslint.config.mjs): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/instrumentation.ts](../../clients/instrumentation.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/lib/api.ts](../../clients/lib/api.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/lib/server.ts](../../clients/lib/server.ts): server-only Hono bridge.
+- [clients/next-env.d.ts](../../clients/next-env.d.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/next.config.mjs](../../clients/next.config.mjs): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/package.json](../../clients/package.json): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/postcss.config.mjs](../../clients/postcss.config.mjs): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [clients/proxy.ts](../../clients/proxy.ts): Host rejection for all Next pages/assets/API requests.
+- [clients/scripts/runtime-boundary.test.mjs](../../clients/scripts/runtime-boundary.test.mjs): Automated positive/negative acceptance or regression evidence.
+- [clients/scripts/start.mjs](../../clients/scripts/start.mjs): Pre-bind runtime validation or boundary fixture runner.
+- [clients/tsconfig.json](../../clients/tsconfig.json): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [docker-compose.yml](../../docker-compose.yml): Reproducible image and private localhost topology/startup order.
+- [Dockerfile](../../Dockerfile): Reproducible image and private localhost topology/startup order.
+- [docs/C4-Model/C4_MODEL_ARCHITECTURE.md](../../docs/C4-Model/C4_MODEL_ARCHITECTURE.md): Requirements/architecture/design/evidence registration.
+- [docs/design/UI_DESIGN_WORKFLOW.md](../../docs/design/UI_DESIGN_WORKFLOW.md): Requirements/architecture/design/evidence registration.
+- [docs/development/FC-001-runbook.md](../../docs/development/FC-001-runbook.md): Requirements/architecture/design/evidence registration.
+- [docs/development/verification.md](../../docs/development/verification.md): Requirements/architecture/design/evidence registration.
+- [package.json](../../package.json): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [packages/contracts/eslint.config.mjs](../../packages/contracts/eslint.config.mjs): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [packages/contracts/package.json](../../packages/contracts/package.json): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [packages/contracts/src/index.test.ts](../../packages/contracts/src/index.test.ts): Automated positive/negative acceptance or regression evidence.
+- [packages/contracts/src/index.ts](../../packages/contracts/src/index.ts): Zod input/DTO contracts, normalizeFilm, usdToMicros, formatMicros.
+- [packages/contracts/tsconfig.json](../../packages/contracts/tsconfig.json): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [playwright.config.ts](../../playwright.config.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [pnpm-lock.yaml](../../pnpm-lock.yaml): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [pnpm-workspace.yaml](../../pnpm-workspace.yaml): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [README.md](../../README.md): Requirements/architecture/design/evidence registration.
+- [scripts/compose-smoke.mjs](../../scripts/compose-smoke.mjs): Canonical ports, worker independence, restart persistence/logout acceptance.
+- [servers/package.json](../../servers/package.json): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [servers/scripts/check-guardrails.test.mjs](../../servers/scripts/check-guardrails.test.mjs): Automated positive/negative acceptance or regression evidence.
+- [servers/scripts/copy-migrations.mjs](../../servers/scripts/copy-migrations.mjs): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [servers/src/app.ts](../../servers/src/app.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [servers/src/auth/sessions.ts](../../servers/src/auth/sessions.ts): unlock/authenticate/revoke; opaque durable sessions and token fingerprint.
+- [servers/src/config/runtime.ts](../../servers/src/config/runtime.ts): runtimeConfig and canonical origin/operator constants.
+- [servers/src/db/migrate-cli.ts](../../servers/src/db/migrate-cli.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [servers/src/db/migrate.integration.test.ts](../../servers/src/db/migrate.integration.test.ts): Automated positive/negative acceptance or regression evidence.
+- [servers/src/db/migrate.ts](../../servers/src/db/migrate.ts): inspectSchema/preflight/migrateDatabase; finite catalog and journal verification.
+- [servers/src/db/migrations/0000_magenta_hardball.sql](../../servers/src/db/migrations/0000_magenta_hardball.sql): Immutable SQL / Drizzle journal/snapshot / supported catalog evidence.
+- [servers/src/db/migrations/meta/_journal.json](../../servers/src/db/migrations/meta/_journal.json): Immutable SQL / Drizzle journal/snapshot / supported catalog evidence.
+- [servers/src/db/migrations/meta/0000_snapshot.json](../../servers/src/db/migrations/meta/0000_snapshot.json): Immutable SQL / Drizzle journal/snapshot / supported catalog evidence.
+- [servers/src/db/migrations/meta/state-1.json](../../servers/src/db/migrations/meta/state-1.json): Immutable SQL / Drizzle journal/snapshot / supported catalog evidence.
+- [servers/src/db/schema/films.ts](../../servers/src/db/schema/films.ts): Drizzle tables/types and constraints; no Story/ledger tables.
+- [servers/src/db/schema/index.ts](../../servers/src/db/schema/index.ts): Drizzle tables/types and constraints; no Story/ledger tables.
+- [servers/src/db/schema/sessions.ts](../../servers/src/db/schema/sessions.ts): Drizzle tables/types and constraints; no Story/ledger tables.
+- [servers/src/db/seed.ts](../../servers/src/db/seed.ts): Workspace/build/lint/test configuration or entrypoint supporting FC-001.
+- [servers/src/films/film.integration.test.ts](../../servers/src/films/film.integration.test.ts): Automated positive/negative acceptance or regression evidence.
+- [servers/src/films/repository.ts](../../servers/src/films/repository.ts): filmDto/requestHash/createFilm/getFilm; commit-before-response idempotency.
+- [servers/src/http/errors.ts](../../servers/src/http/errors.ts): ApiFailure/failure public envelope.
+- [servers/src/http/film-api.ts](../../servers/src/http/film-api.ts): createFilmApi; request security, bounded parser, routes and safe errors.
+- [servers/src/http/network.test.ts](../../servers/src/http/network.test.ts): Automated positive/negative acceptance or regression evidence.
+- [servers/src/routes/health.integration.test.ts](../../servers/src/routes/health.integration.test.ts): Automated positive/negative acceptance or regression evidence.
+- [servers/src/routes/health.test.ts](../../servers/src/routes/health.test.ts): Automated positive/negative acceptance or regression evidence.
+- [specs/eng-dec-001/tasks.md](../../specs/eng-dec-001/tasks.md): Requirements/architecture/design/evidence registration.
+- [specs/film-creation/spec.md](../../specs/film-creation/spec.md): Requirements/architecture/design/evidence registration.
+- [specs/film-creation/tasks.md](../../specs/film-creation/tasks.md): Requirements/architecture/design/evidence registration.
+- [tests/e2e/film.spec.ts](../../tests/e2e/film.spec.ts): Automated positive/negative acceptance or regression evidence.
+- Removed server-local pnpm-workspace.yaml; its responsibilities moved to the root workspace. Server-local lockfile moved to root; no runtime dependency upgrade.

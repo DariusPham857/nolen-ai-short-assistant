@@ -130,4 +130,3 @@ accepted CONTAIN. Branch-policy administration and Film contracts are outside th
 increment and must not be inferred from CI success. No product API/schema migration.
 Final handoff update only changes evidence/status and removes one trailing blank
 line; application and validator behavior remains the CI-tested candidate.
-

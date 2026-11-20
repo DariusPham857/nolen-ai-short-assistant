@@ -38,4 +38,3 @@ describe("Health Routes", () => {
     expect(body).toEqual({ error: "Not Found", path: "/api/nonexistent" });
   });
 });
-

@@ -4,6 +4,7 @@ import { ESLint } from 'eslint';
 import tseslint from 'typescript-eslint';
 import { spawnSync } from 'node:child_process';
 import config, { boundaries } from '../eslint.config.mjs';
+import contractsConfig from '../../packages/contracts/eslint.config.mjs';
 
 const imports = new ESLint({ overrideConfigFile: true, overrideConfig: [
   { files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser } }, ...boundaries,
@@ -20,6 +21,14 @@ test('UI and domain boundaries catch forbidden imports but allow contracts', asy
   assert.equal(await restricted('import x from "hono";', 'src/domain/example.ts'), true);
   assert.equal(await restricted('import x from "../contracts/provider.js";', 'src/domain/example.ts'), false);
   assert.equal(await restricted('import x from "@runwayml/sdk";', 'src/routes/example.ts'), true);
+});
+
+test('browser-safe contract rules reject server package aliases',async()=>{
+  const eslint=new ESLint({overrideConfigFile:true,overrideConfig:contractsConfig});
+  const [bad]=await eslint.lintText('import { app } from "@nolen/server";',{filePath:'src/contract-fixture.ts'});
+  assert.ok(bad.messages.some(m=>m.ruleId==='no-restricted-imports'));
+  const [good]=await eslint.lintText('import { z } from "zod";',{filePath:'src/contract-fixture.ts'});
+  assert.equal(good.errorCount,0);
 });
 
 test('typed lint catches unsafe assignment, suppression and floating promise', async () => {

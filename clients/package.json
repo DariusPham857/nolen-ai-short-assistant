@@ -8,7 +8,7 @@
     "build": "next build --webpack",
     "start": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint app/ components/ lib/ instrumentation.ts --max-warnings 0",
+    "lint": "eslint app/ components/ lib/ instrumentation.ts proxy.ts --max-warnings 0",
     "test:boundary": "node --test scripts/runtime-boundary.test.mjs"
   },
   "dependencies": {
