@@ -1,6 +1,6 @@
 # FC-001 tasks and evidence
 
-Status: LOCAL_ACCEPTANCE_BLOCKED
+Status: DONE
 Source: [approved v1.1.1](spec.md)
 
 ## Tasks
@@ -186,3 +186,33 @@ Source mapping: FR-01/MVP-01 and the approved spec above; topology clarification
 - Restoring the local Docker installation and rerunning the runbook's fresh test
   project/Compose smoke is the remaining local acceptance step. Existing data must
   be preserved. This environment incident is not an accepted code workaround/debt.
+
+### Local acceptance rerun — 2026-11-20 (blocker RESOLVED)
+- Tested source HEAD 60021892aeaa40c547254ffe9d4aaa703ec7f004 with clean working
+  tree before execution. No application code changes were required.
+- Docker API recovered: engine 29.9.3. No factory reset, prune, force-kill or
+  application volume deletion was performed by this rerun.
+- `pnpm build`: PASS on Windows from the current source (contracts/server/web),
+  rebuilding local artifacts rather than relying on the interrupted run's output.
+- `pnpm test:integration`: PASS, 3 files / 11 tests against isolated PostgreSQL 16
+  container nolen-fc001-rerun-pg16 on loopback port 55432. Includes migration
+  compatibility, schema/data preservation, sessions and 20-way idempotency.
+- `docker compose -p nolen-fc001-acceptance up --build --detach --wait --wait-timeout 180`:
+  PASS using a new test volume. Frozen dependency installation retried a transient
+  tarball download and completed; image build, migration exit 0 and web health passed.
+- `COMPOSE_PROJECT_NAME=nolen-fc001-acceptance node scripts/compose-smoke.mjs`:
+  PASS canonical web-only host port, private DB, worker-independent create,
+  persistent Film/session across web restart, durable logout across another restart.
+- `pnpm test:e2e`: PASS, 6/6 on the rebuilt production Next server and real PG16.
+  Covers session DB lookup outage, create/read/reload/logout, copied-cookie replay,
+  response loss/5xx retry, exact money, form recovery, mobile and Host/Origin rejection.
+- [CI on the previously pending handoff commit](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44672629927):
+  SUCCESS on 6002189, both film and compose jobs. All 39 tests/fixtures and Compose
+  acceptance had completed; the other PR-triggered run also succeeded.
+- Cleanup: stopped only the test Compose project, preserving its volume; stopped
+  the disposable standalone test DB after verification. Other running projects untouched.
+- This evidence supersedes the historical LOCAL_ACCEPTANCE_BLOCKED state above.
+  FC-01 through FC-08 are DONE within the approved create/read scope. PR remains
+  unmerged pending owner review; no release G0–G5 or independent-human-review claim.
+- Changed documentation only: this task record and spec status. Next step: owner
+  review of PR #4, then Story Planning & Approval under its own approved plan.
