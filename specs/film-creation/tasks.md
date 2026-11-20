@@ -62,3 +62,18 @@ Next FC-02a and FC-03. No implementation PASS claimed yet.
 - Playwright production web + real PG16: PASS 4/4 (create/read/reload/logout,
   response loss after commit, 5xx after commit, bigint overflow/mobile).
 - Next: Compose acceptance, visual review, independent CI and final file registry.
+
+### Local environment interruption / FC-07
+- Initial Linux image build PASS without runtime secrets. Parallel Compose image
+  export then failed with Docker Desktop overlayfs input/output errors; Docker API
+  stopped responding and the isolated PG16 port returned CONNECT_TIMEOUT.
+- Corrected duplicate build definitions: only web builds; migration/worker reuse image.
+  No reset/prune or application volume deletion performed.
+- Latest 5-test E2E rerun BLOCKED by unavailable PG16 at unlock; earlier 4-test run
+  PASS remains historical evidence, not a PASS for the new fifth case.
+- Added unit regression from observed postgres-js CONNECT_TIMEOUT: session lookup
+  returns safe 503, unclassified exception returns 500. Unit suite now PASS 10/10.
+- Visual inspection of earlier desktop brief/mobile form screenshots: no horizontal
+  overflow at 390px, zinc/amber hierarchy and real money display. Replaced Arial
+  fallback with locally bundled Geist Sans/Mono per design tokens; build PASS.
+- Next: independent CI on clean Ubuntu; final browser/Compose acceptance pending.

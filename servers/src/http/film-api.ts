@@ -100,6 +100,6 @@ export function createFilmApi() {
 /** Drizzle wraps driver errors in cause; recognize DB/network failures without exposing details. */
 function isDatabaseFailure(error: unknown, depth = 0): boolean {
   if (!error || typeof error !== 'object' || depth > 4) return false;
-  if ('code' in error && typeof error.code === 'string' && (/^[0-9A-Z]{5}$/.test(error.code) || /^(ECONN|ETIMEDOUT|EPIPE|ENOTFOUND|CONNECTION_)/.test(error.code))) return true;
+  if ('code' in error && typeof error.code === 'string' && (/^[0-9A-Z]{5}$/.test(error.code) || /^(ECONN|ETIMEDOUT|EPIPE|ENOTFOUND|CONNECTION_|CONNECT_)/.test(error.code))) return true;
   return 'cause' in error && isDatabaseFailure(error.cause, depth + 1);
 }
