@@ -10,3 +10,4 @@ AI short-film assistant scaffold. Start with [AGENTS](AGENTS.md) and
 - [Feature specs and templates](specs/README.md)
 - [Current implementation evidence](specs/eng-dec-001/tasks.md)
 - [Debt tracker](docs/DEBT.md)
+- [Film Creation startup and verification](docs/development/FC-001-runbook.md)

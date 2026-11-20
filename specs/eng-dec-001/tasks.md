@@ -60,7 +60,7 @@ table and specs index. They change workflow only, with no product API exports.
 
 ### T4A–C handoff
 - [Node pin](../../.node-version), [package](../../servers/package.json),
-  [lockfile](../../servers/pnpm-lock.yaml), [test typecheck](../../servers/tsconfig.check.json):
+  [lockfile](../../pnpm-lock.yaml), [test typecheck](../../servers/tsconfig.check.json):
   Node 22.23.0, pnpm 11.21.0, added typescript-eslint 8.62.0 only; runtime resolutions unchanged.
 - [ESLint](../../servers/eslint.config.mjs), [guardrail tests](../../servers/scripts/check-guardrails.test.mjs):
   typed safety and import restrictions with positive/negative fixtures and empty-suite failure.

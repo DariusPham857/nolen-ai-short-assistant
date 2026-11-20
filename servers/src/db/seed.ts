@@ -21,7 +21,10 @@ async function seed() {
       brief:
         "A 30-second product showcase demonstrating AI-assisted film production with consistent character and branding across 3 shots.",
       status: "DRAFT",
-      budgetLimitUsdMicros: 5_000_000, // $5.00
+      budgetLimitUsdMicros: 5_000_000n, // $5.00
+      operatorId: "local-operator",
+      idempotencyKey: "a0a5ea00-0000-4000-8000-000000000001",
+      requestHash: "seed",
       durationTargetSeconds: 30,
       aspectRatio: "9:16",
       styleNotes: "Modern, clean, minimal motion graphics with product focus.",

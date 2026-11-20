@@ -2,8 +2,10 @@
 
 Source: [ENG-DEC-001](ENG-DEC-001.md). See [evidence](../../specs/eng-dec-001/tasks.md).
 
-Toolchain: Node 22.23.0 (`.node-version`), pnpm 11.21.0 (server packageManager).
-From repository root run `pnpm --dir servers install --frozen-lockfile`.
+Toolchain: Node 22.23.0 (`.node-version`), pnpm 11.21.0 (root packageManager).
+FC-001 adds a root workspace/lockfile. From repository root run `pnpm install --frozen-lockfile`
+and `pnpm build` before the server checks below. Full product commands and database
+constraints: [FC-001 runbook](FC-001-runbook.md).
 Then run each command separately (a failure must not be hidden by a later command):
 
 ```text
@@ -21,12 +23,13 @@ Integration requires DATABASE_URL pointing to a disposable PostgreSQL 16 databas
 CI provides a service; local tests must not point to production. No schema writes
 are needed for this health-only test. PostgreSQL unavailable means BLOCKED, not PASS.
 Unit health tests mock connectivity; financial concurrency tests remain NOT_IMPLEMENTED.
+FC-001 integration additionally verifies Film/session/migration behavior on PG16.
 
 ESLint rules use [typed linting](https://typescript-eslint.io/getting-started/typed-linting/)
 and [restricted imports](https://eslint.org/docs/latest/rules/no-restricted-imports).
-Scaffold lint covers server source, including tests. Client boundaries currently
-have fixture evidence only: no frontend exists. Wiring future client lint and
-checking dynamic imports/re-exports is required before claiming frontend isolation.
+Scaffold lint covers server source including tests. FC-001 adds client lint,
+browser-safe contracts restrictions and a Next negative build for indirect
+Client Component imports through the server-only bridge.
 Restrictions are not a runtime security boundary or a full dependency graph analysis.
 
 Evidence validator covers project engineering docs, specs and rule links; excludes

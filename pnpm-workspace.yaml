@@ -1,0 +1,7 @@
+packages:
+  - clients
+  - servers
+  - packages/*
+allowBuilds:
+  esbuild: true
+  sharp: true

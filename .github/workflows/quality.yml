@@ -1,9 +1,9 @@
-name: Scaffold quality
+name: Film quality
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  scaffold:
+  film:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -16,12 +16,10 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U nolen -d nolen_test"
           --health-interval 5s --health-timeout 5s --health-retries 12
-    defaults:
-      run:
-        working-directory: servers
     env:
       DATABASE_URL: postgresql://nolen:nolen_ci@127.0.0.1:5432/nolen_test
       EXECUTION_MODE: REPLAY
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,24 +30,47 @@ jobs:
           version: 11.21.0
           run_install: false
       - run: pnpm install --frozen-lockfile
-      - name: QG-CODE lint
-        run: pnpm lint
-      - name: QG-CODE typecheck source and tests
-        run: pnpm typecheck
-      - name: QG-CODE build
+      - name: QG-CODE build (no operator secret)
         run: pnpm build
-      - name: QG-DOMAIN existing scaffold only
-        run: pnpm test
-      - name: QG-ARCH negative fixtures and empty-suite discovery
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: QG-ARCH negative fixtures
         run: pnpm test:guardrails
-      - name: QG-EVIDENCE validator fixtures
-        run: pnpm test:evidence
-      - name: QG-EVIDENCE documents
-        run: pnpm check:evidence
-      - name: QG-INTEGRATION PostgreSQL 16 connectivity only
+      - name: QG-ARCH runtime and indirect server-only build
+        run: pnpm --filter @nolen/web test:boundary
+      - run: pnpm test:evidence
+      - run: pnpm check:evidence
+      - name: QG-INTEGRATION PostgreSQL 16 migrations, sessions, concurrency
         run: pnpm test:integration
+      - run: pnpm db:migrate
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: QG-EVIDENCE production browser flows
+        run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: film-e2e-evidence
+          path: test-results/
       - name: Evidence scope
         if: always()
         run: |
-          echo 'Scaffold checks only. Finance, jobs, provider invariants and client runtime boundaries: NOT_IMPLEMENTED.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'See step results; skipped checks are not PASS. This workflow does not assert G0–G5 release acceptance or branch-protection enforcement.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'FC-001 create/read only. Finance, generation/jobs, continuity and media: NOT_IMPLEMENTED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Missing/skipped checks are not PASS; no G0–G5 release acceptance or branch protection claimed.' >> "$GITHUB_STEP_SUMMARY"
+  compose:
+    runs-on: ubuntu-latest
+    env:
+      OPERATOR_TOKEN: ci-only-operator-token-at-least-32-bytes
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fresh localhost topology
+        run: docker compose -p fc001-ci up --build --detach --wait --wait-timeout 180
+      - name: Verify published port and worker independence
+        run: |
+          COMPOSE_PROJECT_NAME=fc001-ci node scripts/compose-smoke.mjs
+      - name: Logs
+        if: failure()
+        run: docker compose -p fc001-ci logs --tail 80
+      - name: Cleanup test project
+        if: always()
+        run: docker compose -p fc001-ci down --volumes
