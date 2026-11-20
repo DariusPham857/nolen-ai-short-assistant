@@ -9,6 +9,7 @@ import {
   bigint,
   check,
   uniqueIndex,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -79,6 +80,7 @@ export const films = pgTable("films", {
   operatorId: varchar("operator_id", { length: 64 }).notNull(),
   idempotencyKey: uuid("idempotency_key").notNull(),
   requestHash: varchar("request_hash", { length: 64 }).notNull(),
+  createReceipt: jsonb('create_receipt'),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

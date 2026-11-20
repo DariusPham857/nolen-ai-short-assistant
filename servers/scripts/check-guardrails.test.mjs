@@ -19,6 +19,9 @@ test('UI and domain boundaries catch forbidden imports but allow contracts', asy
   assert.equal(await restricted('import x from "../../../servers/src/db/index.js";', 'clients/example.ts'), true);
   assert.equal(await restricted('import x from "../providers/adapters/runway.js";', 'src/domain/example.ts'), true);
   assert.equal(await restricted('import x from "hono";', 'src/domain/example.ts'), true);
+  assert.equal(await restricted('import x from "@runwayml/sdk";', 'src/stories/domain.ts'), true);
+  assert.equal(await restricted('import x from "hono";', 'src/stories/domain.ts'), true);
+  assert.equal(await restricted('import x from "@nolen/contracts";', 'src/stories/domain.ts'), false);
   assert.equal(await restricted('import x from "../contracts/provider.js";', 'src/domain/example.ts'), false);
   assert.equal(await restricted('import x from "@runwayml/sdk";', 'src/routes/example.ts'), true);
 });

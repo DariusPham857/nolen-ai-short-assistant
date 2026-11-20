@@ -9,7 +9,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator';
 export const migrationFolder = fileURLToPath(new URL('./migrations', import.meta.url));
 
 /** Finite catalog fingerprint for FC-001 application objects, not a general diff engine. */
-export async function inspectSchema(client: postgres.Sql) {
+export async function inspectSchema(client: postgres.Sql, state = 1) {
   const objects = await client`SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
     WHERE n.nspname='public' AND c.relkind IN ('r','v','m','S','f') ORDER BY c.relname`;
   const columns = await client`SELECT table_name,column_name,ordinal_position,data_type,udt_name,is_nullable,column_default,character_maximum_length
@@ -20,19 +20,27 @@ export async function inspectSchema(client: postgres.Sql) {
   const indexes = await client`SELECT tablename,indexname,indexdef FROM pg_indexes WHERE schemaname='public' ORDER BY tablename,indexname`;
   const enums = await client`SELECT t.typname,e.enumlabel,e.enumsortorder FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid
     JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' ORDER BY t.typname,e.enumsortorder`;
-  return { objects: [...objects], columns: [...columns], constraints: [...constraints], indexes: [...indexes], enums: [...enums] };
+  const base = { objects: [...objects], columns: [...columns], constraints: [...constraints], indexes: [...indexes], enums: [...enums] };
+  if (state < 2) return base;
+  const triggers = await client`SELECT c.relname,t.tgname,t.tgenabled,pg_get_triggerdef(t.oid) AS definition
+    FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgname LIKE 'sp_%' ORDER BY c.relname,t.tgname`;
+  const functions = await client`SELECT p.proname,pg_get_functiondef(p.oid) AS definition FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('sp_guard_immutable','sp_guard_revision','sp_guard_waiver') ORDER BY p.proname`;
+  return {...base,triggers:[...triggers],functions:[...functions]};
 }
 
 /** Verify the complete applied prefix and exact supported schema BEFORE any write. */
 export async function preflight(client: postgres.Sql, folder = migrationFolder): Promise<void> {
   const files = readMigrationFiles({ migrationsFolder: folder });
-  const schema = await inspectSchema(client);
   const [journal] = await client`SELECT to_regclass('drizzle.__drizzle_migrations') AS name`;
   if (!journal?.name) {
+    const schema = await inspectSchema(client,2);
     if (Object.values(schema).some(rows => rows.length)) throw new Error('SCHEMA_MISMATCH: unmanaged application schema');
     return;
   }
   const applied = await client`SELECT hash,created_at FROM drizzle.__drizzle_migrations ORDER BY id`;
+  const schema = await inspectSchema(client,applied.length===0?2:applied.length);
   if (applied.length > files.length) throw new Error('SCHEMA_MISMATCH: unknown migration');
   for (let i = 0; i < applied.length; i++) {
     if (applied[i].hash !== files[i].hash || String(applied[i].created_at) !== String(files[i].folderMillis)) {

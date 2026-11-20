@@ -35,6 +35,6 @@ describe("Health Routes", () => {
     const res = await app.request("http://127.0.0.1:3000/api/nonexistent");
     expect(res.status).toBe(404);
     const body: unknown = await res.json();
-    expect(body).toEqual({ error: "Not Found", path: "/api/nonexistent" });
+    expect(body).toEqual({ error: {code:'NOT_FOUND',message:'Route not found',requestId:timestampMatcher} });
   });
 });

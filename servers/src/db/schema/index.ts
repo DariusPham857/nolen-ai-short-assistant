@@ -10,6 +10,7 @@
 
 export * from "./films.js";
 export * from "./sessions.js";
+export * from './stories.js';
 // Future schema exports (EP-01, EP-02):
 // export * from "./story-revisions.js";
 // export * from "./scenes.js";
