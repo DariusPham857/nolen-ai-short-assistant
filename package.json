@@ -1,0 +1,19 @@
+{
+  "name": "nolen-ai-short-assistant",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": { "node": "22.23.0" },
+  "scripts": {
+    "build": "pnpm --filter @nolen/contracts build && pnpm --filter @nolen/server build && pnpm --filter @nolen/web build",
+    "typecheck": "pnpm --filter @nolen/contracts build && pnpm -r typecheck",
+    "lint": "pnpm --filter @nolen/server lint && pnpm --filter @nolen/web lint && pnpm --filter @nolen/contracts lint",
+    "test": "pnpm --filter @nolen/contracts test && pnpm --filter @nolen/server test",
+    "test:integration": "pnpm --filter @nolen/server test:integration",
+    "test:e2e": "playwright test",
+    "test:guardrails": "pnpm --filter @nolen/server test:guardrails",
+    "check:evidence": "node scripts/check-evidence.mjs",
+    "test:evidence": "node --test scripts/check-evidence.test.mjs",
+    "db:migrate": "pnpm --filter @nolen/server db:migrate"
+  },
+  "devDependencies": { "@playwright/test": "1.65.1" }
+}

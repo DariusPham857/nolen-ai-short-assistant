@@ -60,7 +60,7 @@ table and specs index. They change workflow only, with no product API exports.
 
 ### T4A–C handoff
 - [Node pin](../../.node-version), [package](../../servers/package.json),
-  [lockfile](../../servers/pnpm-lock.yaml), [test typecheck](../../servers/tsconfig.check.json):
+  [lockfile](../../pnpm-lock.yaml), [test typecheck](../../servers/tsconfig.check.json):
   Node 22.23.0, pnpm 11.21.0, added typescript-eslint 8.62.0 only; runtime resolutions unchanged.
 - [ESLint](../../servers/eslint.config.mjs), [guardrail tests](../../servers/scripts/check-guardrails.test.mjs):
   typed safety and import restrictions with positive/negative fixtures and empty-suite failure.
@@ -130,3 +130,4 @@ accepted CONTAIN. Branch-policy administration and Film contracts are outside th
 increment and must not be inferred from CI success. No product API/schema migration.
 Final handoff update only changes evidence/status and removes one trailing blank
 line; application and validator behavior remains the CI-tested candidate.
+

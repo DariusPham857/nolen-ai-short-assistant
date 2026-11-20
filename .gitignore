@@ -29,6 +29,10 @@ Thumbs.db
 
 # PR helper drafts
 .pr_draft.md
+*.tsbuildinfo
+test-results/
+playwright-report/
+clients/.boundary-*/
 
 # External sub-repo clones in .agents
 .agents/andrej-karpathy-skills/
