@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import { cors } from "hono/cors";
 import { healthRoutes } from "./routes/health.js";
+import { createFilmApi } from "./http/film-api.js";
 
 /**
  * Root Hono application.
@@ -16,14 +16,7 @@ export const app = new Hono();
 
 // ── Middleware ───────────────────────────────────────────
 app.use("*", logger());
-app.use(
-  "*",
-  cors({
-    origin: ["http://localhost:3000"],
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowHeaders: ["Content-Type", "Authorization"],
-  }),
-);
+app.route("/", createFilmApi());
 
 // ── Routes ──────────────────────────────────────────────
 app.route("/api/health", healthRoutes);
@@ -34,9 +27,9 @@ app.notFound((c) =>
 );
 
 app.onError((err, c) => {
-  console.error(`[server] unhandled error: ${err.message}`, err);
+  console.error('[server] unhandled request failure');
   return c.json(
-    { error: "Internal Server Error", message: err.message },
+    { error: { code: "INTERNAL_ERROR", message: "Request failed" } },
     500,
   );
 });

@@ -11,8 +11,9 @@ it("connects to real PostgreSQL 16 and reports ready", async () => {
   const version = Number(rows[0]?.server_version_num);
   expect(version).toBeGreaterThanOrEqual(160000);
   expect(version).toBeLessThan(170000);
-  const response = await app.request("/api/health/ready");
+  const response = await app.request("http://127.0.0.1:3000/api/health/ready");
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
   expect(body).toEqual({ status: "ready", timestamp: timestampMatcher, checks: { database: "connected" } });
 });
+

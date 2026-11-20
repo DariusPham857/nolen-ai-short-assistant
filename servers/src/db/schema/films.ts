@@ -6,7 +6,11 @@ import {
   integer,
   timestamp,
   pgEnum,
+  bigint,
+  check,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Film status enum.
@@ -54,8 +58,8 @@ export const films = pgTable("films", {
   status: filmStatusEnum("status").default("DRAFT").notNull(),
 
   /** Maximum budget in integer USD micros (1 USD = 1,000,000). */
-  budgetLimitUsdMicros: integer("budget_limit_usd_micros")
-    .default(0)
+  budgetLimitUsdMicros: bigint("budget_limit_usd_micros", { mode: "bigint" })
+    .default(sql`0`)
     .notNull(),
 
   /** Target duration in seconds (30–60s per PRD). */
@@ -72,6 +76,10 @@ export const films = pgTable("films", {
   /** Active story revision pointer (FK added when story_revisions table exists). */
   activeStoryRevisionId: uuid("active_story_revision_id"),
 
+  operatorId: varchar("operator_id", { length: 64 }).notNull(),
+  idempotencyKey: uuid("idempotency_key").notNull(),
+  requestHash: varchar("request_hash", { length: 64 }).notNull(),
+
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -79,7 +87,14 @@ export const films = pgTable("films", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, table => [
+  uniqueIndex("films_operator_idempotency").on(table.operatorId, table.idempotencyKey),
+  check("films_budget_nonnegative", sql`${table.budgetLimitUsdMicros} >= 0`),
+  check("films_duration_bounds", sql`${table.durationTargetSeconds} BETWEEN 30 AND 60`),
+  check("films_title_required", sql`length(trim(${table.title})) > 0`),
+  check("films_brief_bounds", sql`length(trim(${table.brief})) BETWEEN 1 AND 10000`),
+  check("films_style_bounds", sql`${table.styleNotes} IS NULL OR length(${table.styleNotes}) <= 2000`),
+]);
 
 /** TypeScript type for a Film row. */
 export type Film = typeof films.$inferSelect;
