@@ -1,9 +1,9 @@
 # SP-001 — Story Planning & Approval (G1) — Feature Specification
 
-Status: IMPLEMENTED_LOCAL_VERIFIED_PENDING_REVIEW
+Status: IMPLEMENTED_VERIFIED_PENDING_REVIEW
 Source: [PRD v1.0](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
-**Status:** `IMPLEMENTED_LOCAL_VERIFIED_PENDING_REVIEW` — implementation authorized 2026-11-20; local acceptance passed; independent review and owner G1 sign-off pending
+**Status:** `IMPLEMENTED_VERIFIED_PENDING_REVIEW` — implementation authorized 2026-11-20; local acceptance and implementation CI passed; independent review and owner G1 sign-off pending
 **Prepared:** 2026-11-20
 **Repository baseline:** `main@d099afbc2c1564ba1103b057a33eeb44de8163da` (FC-001 merged)
 **Owner:** Producer / project owner (implementation authorized 2026-11-20)

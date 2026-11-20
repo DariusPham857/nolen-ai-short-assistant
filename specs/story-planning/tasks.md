@@ -1,5 +1,5 @@
 # SP-001 tasks
-Status: IMPLEMENTED_LOCAL_VERIFIED_PENDING_REVIEW
+Status: IMPLEMENTED_VERIFIED_PENDING_REVIEW
 Source: [Approved specification](spec.md)
 
 ## Tasks
@@ -14,7 +14,7 @@ Source: [Approved specification](spec.md)
 | SP-05 | REQUIRED: lifecycle/security/evidence; AT-SP-29/30 | PASS: authoritative approval evidence, edit race, Host/Origin/session/error envelope |
 | SP-06 | REQUIRED: storyboard UI | PASS: production browser canonical approval/history/mobile, draft/conflict recovery |
 | SP-07 | REQUIRED: fixture proposal provenance | PASS: FIXTURE provenance API + production UI acceptance |
-| SP-08 | REQUIRED: PG16/E2E/review and G1 handoff | Local automated acceptance PASS; remote CI and independent/owner review PENDING |
+| SP-08 | REQUIRED: PG16/E2E/review and G1 handoff | Local acceptance and implementation CI PASS; independent/owner review PENDING |
 
 ## Handoff
 Baseline: main d099afbc2c1564ba1103b057a33eeb44de8163da, branch feature/story-planning.
@@ -73,3 +73,10 @@ This mapping describes automated test scope, not independent acceptance of every
 
 Final review correction: recurring characters changing locked style now produce non-waivable IDENTITY_LOCK. Added tests prove a keyframe override cannot bypass it and that duplicate/remove preserves stable-ID history. Validation evidence checks persisted findings against authoritative recomputation before binding its ID to approval. A validation behavior change after release must bump the rule-set version; same-version evidence mismatch fails closed.
 Execution notes: initial sandbox network/artifact permissions required approved reruns with the same toolchain. A browser run was blocked by the test Compose project occupying port 3000; only that test project was stopped before rerunning. These were environment/test setup failures, not hidden source regressions or accepted product workarounds.
+
+### Remote CI and publication handoff
+Implementation commit `4dc54c5b484b8ba715d139ebf2296a9a0a1baba9` verified by [GitHub Actions run 44690632291](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44690632291): overall SUCCESS, both `film` and `compose` SUCCESS. This subsequent documentation-only commit records that immutable implementation evidence; it does not change runtime code.
+
+Branch feature/story-planning pushed. PR creation is BLOCKED by GitHub connector permission (403 Resource not accessible by integration). Automatic approval review rejected reading stored Git credentials and inspecting an unrelated browser window; neither action was performed. No credential or browser-security settings changed. A local ignored .pr_draft.md contains the prepared PR body; compare feature/story-planning against main to review/create the PR. This publication blocker is not accepted technical debt and does not weaken any gate.
+
+Independent review/owner G1 acceptance still PENDING; no merge or DONE claim. Paid planning, VIDEO_DISPATCH and G2–G5 remain deferred. Test-only Docker resources are cleaned separately; no user database resets or WSL changes.
