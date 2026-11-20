@@ -1672,12 +1672,14 @@ Endpoint paths are proposed API design (not deployed):
 
 ### 29.2 Canonical film package and shot matrix
 
+[DECIDED, 2026-11-20] SP-001 owner approval aligns this pilot to 9:16 (45s/eight shots), replacing the earlier proposed 16:9 format. Source: [SP-001 approved contracts](../../specs/story-planning/spec.md#invariants).
+
 **Working title: _The Last Light_ [PROPOSAL].** A fictional adult protagonist notices a small lamp glowing in a dark interior and follows its light to make a hopeful connection. Use a fictional/synthetic character, original visual references and an unbranded lamp. No real likeness/voice without permission. Minimal dialogue lowers TTS/lip-sync confounding; final cut must still include voice-over, properly licensed music and subtitles as required by the existing MVP acceptance contract. Narrative theme is brand storytelling but does not imply a real client logo.
 
 | Locked field | Pilot value (proposed) | Freeze/evidence |
 |---|---|---|
 | Target film | 45 s, tolerance only within challenge 30–60 s | `filmId`, master StoryRevision |
-| Format | 16:9, target 1080p export (generation resolution may differ, disclose upscaling) | export profile hash |
+| Format | 9:16, target 1080 × 1920 export (generation resolution may differ, disclose upscaling) | export profile hash |
 | Cast | One recurring fictional protagonist | `characterId`, reference PNG SHA-256 |
 | Continuity | Single wardrobe palette + lamp identity + room geography + lighting progression | Story Bible + per-shot start/end continuity sheets |
 | Structure | 2 establishing (S01–02), 3 character/prop (S03–05), 2 action (S06–07), 1 resolution (S08) | eight approved ShotSpec revisions |

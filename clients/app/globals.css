@@ -12,3 +12,5 @@ input:disabled,textarea:disabled,select:disabled { opacity:.65; }
 label { display:block; font-size:14px; color:#d4d4d8; margin-bottom:6px; }
 a { text-underline-offset:4px; }
 main { max-width:960px; margin:auto; padding:40px 24px; }
+main:has(> [data-story-workspace]) { max-width:1600px; }
+[data-story-workspace] input[type='checkbox'] { width:auto; margin-right:8px; }
