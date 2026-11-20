@@ -1,6 +1,6 @@
 # FC-001 — Film Creation v1.1.1
 
-Status: IMPLEMENTING
+Status: IMPLEMENTED_CI_VERIFIED
 Source: [PRD FR-01/MVP-01](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
 ## Goal

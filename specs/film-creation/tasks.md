@@ -1,6 +1,6 @@
 # FC-001 tasks and evidence
 
-Status: IN_PROGRESS
+Status: LOCAL_ACCEPTANCE_BLOCKED
 Source: [approved v1.1.1](spec.md)
 
 ## Tasks
@@ -152,3 +152,37 @@ Source mapping: FR-01/MVP-01 and the approved spec above; topology clarification
 - [specs/film-creation/tasks.md](../../specs/film-creation/tasks.md): Requirements/architecture/design/evidence registration.
 - [tests/e2e/film.spec.ts](../../tests/e2e/film.spec.ts): Automated positive/negative acceptance or regression evidence.
 - Removed server-local pnpm-workspace.yaml; its responsibilities moved to the root workspace. Server-local lockfile moved to root; no runtime dependency upgrade.
+
+### FC-08 read-only author review and independent CI
+- Separate read-only review inspected routes, auth/repository callers, transaction
+  boundary, schema/journal checks, startup, UI uncertainty and negative fixtures.
+  This is author review, not independent human approval.
+- Review corrections: canonical Host guard now covers Next pages/assets as well
+  as API; real browser test checks session-table outage →503 and no-store;
+  definitive 422 preserves form content; browser-safe contract lint also blocks
+  server package aliases. No remaining implementation BLOCK found in this pass.
+- [Clean Ubuntu CI](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44672044221)
+  on adc46cde588c2dfeea2fe8a15fd51c59e6de8503: SUCCESS, both film and compose jobs.
+- PASS: root frozen install, no-secret production build, lint, source/test typecheck.
+- PASS: 2 contract tests, 10 server unit tests, 11 PG16 integration tests,
+  4 architecture/typed/discovery fixtures, 2 runtime/indirect-build tests,
+  4 evidence validator tests, 6 real-browser tests; 18 engineering documents.
+- PASS Compose: only canonical web port published, DB private, worker stopped then
+  Film creation succeeds; Film/session persist across web restart; copied cookie
+  after logout remains unauthorized after another restart.
+- Local Docker I/O outage remains separate environment evidence; latest browser
+  behavior is verified by independent CI, not relabeled as a local PASS.
+- No new accepted exception/debt, no paid calls, no release G0–G5 acceptance claimed.
+- Remaining action: local Docker recovery check and owner PR review. Rollback code
+  without deleting data or downgrading BIGINT. Next product work is Story Planning
+  & Approval after FC-001 acceptance, not another foundation increment.
+
+### Local acceptance blocker — final
+- `docker desktop restart --timeout 60` failed to stop Desktop/backend/WSL processes
+  (context deadline exceeded). A subsequent bounded API probe still timed out.
+- No force-kill, Docker reset/prune, or application volume deletion attempted.
+- Code and clean-CI acceptance are complete; this feature is deliberately not marked
+  DONE while local demonstration remains blocked by the Docker Desktop incident.
+- Restoring the local Docker installation and rerunning the runbook's fresh test
+  project/Compose smoke is the remaining local acceptance step. Existing data must
+  be preserved. This environment incident is not an accepted code workaround/debt.
