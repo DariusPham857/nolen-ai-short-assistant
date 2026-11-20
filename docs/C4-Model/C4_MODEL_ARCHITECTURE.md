@@ -1,5 +1,18 @@
 # C4 Model Architecture — Level 1 & Level 2
 
+## FC-001 deployment clarification [DECIDED, 2026-11-20]
+
+Source: [FC-001 v1.1.1](../../specs/film-creation/spec.md).
+The existing Web container runs Next.js App Router and mounts the Hono app in
+Node.js route handlers. Hono is not a fourth API service. Browser accesses only
+http://127.0.0.1:3000; db/worker ports remain private. Migration is a one-off
+startup command before web/worker, not a new runtime domain service.
+Film create/read does not depend on worker readiness or dispatch jobs.
+FC-001 adds opaque operator sessions in PostgreSQL and browser-safe shared
+contracts; financial/generation/media components in the diagrams remain future
+capabilities, not evidence that those components are implemented.
+
+
 **System:** AI-Powered Cost-Efficient Short Film Production Assistant  
 **Status:** [PROPOSED] (Aligned with DEC-Q01 to DEC-Q04 Local-first Profile)  
 **Owners:** IT 1 (Lead Backend & AI Engine) & IT 2 (Frontend & Media Pipeline)  

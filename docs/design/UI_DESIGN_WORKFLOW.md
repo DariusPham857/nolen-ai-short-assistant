@@ -1,5 +1,16 @@
 # UI/UX Design & Implementation Workflow
 
+## FC-001 scoped application [DECIDED, 2026-11-20]
+
+Source: [Film Creation v1.1.1](../../specs/film-creation/spec.md).
+Create Film and Film Brief — Read Only use the Brief screen's tokens and accessible
+form/read states. They do not instantiate Scene/Shot panes, revision-token inputs
+before a revision exists, or Spent/Reserved/Available metrics before the ledger.
+Integer micros are formatted through exact string/bigint helpers, not floating
+division. The three-pane/revision rules below apply when those production
+workflows are implemented. This is the approved slice boundary, not a workaround.
+
+
 This document establishes the official engineering workflow for designing, building, and reviewing user interfaces in `nolen-ai-short-assistant`. It synthesizes best practices from **Impeccable** (system tokens & craft dials), **Hallmark** (anti-slop floor & honest data), **Taste-Skill** (density & editorial restraint), and **UI-UX-Pro-Max** (shadcn/ui & Tailwind architecture).
 
 ---

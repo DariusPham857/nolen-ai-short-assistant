@@ -1,0 +1,2 @@
+# Drizzle hashes SQL bytes; keep applied migration content identical across OSes.
+servers/src/db/migrations/** text eol=lf

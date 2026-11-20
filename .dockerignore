@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+**/.env*
+test-results
+playwright-report
+.pr_draft.md
+references
+.agents
+clients/.boundary-*
