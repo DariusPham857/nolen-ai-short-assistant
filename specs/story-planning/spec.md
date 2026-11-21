@@ -1,9 +1,9 @@
 # SP-001 — Story Planning & Approval (G1) — Feature Specification
 
-Status: IMPLEMENTED_VERIFIED_PENDING_REVIEW
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [PRD v1.0](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
-**Status:** `IMPLEMENTED_VERIFIED_PENDING_REVIEW` — implementation authorized 2026-11-20; local acceptance and implementation CI passed; independent review and owner G1 sign-off pending
+**Status:** `IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` — base implementation merged; continuity ruleset-v2 local acceptance passed; remote patch CI and owner G1 sign-off pending
 **Prepared:** 2026-11-20
 **Repository baseline:** `main@d099afbc2c1564ba1103b057a33eeb44de8163da` (FC-001 merged)
 **Owner:** Producer / project owner (implementation authorized 2026-11-20)
@@ -260,9 +260,19 @@ No remaining implementation contract decisions. VIDEO_DISPATCH, paid inference a
 
 
 ### Frozen transport details
-[DECIDED] Runtime definitions: [contracts](../../packages/contracts/src/story.ts); relational implementation: [schema](../../servers/src/db/schema/stories.ts). Both Bible and ShotSpec schemaVersion are `1`; current rule set is `story-approval-1`.
+[DECIDED] Runtime definitions: [contracts](../../packages/contracts/src/story.ts); relational implementation: [schema](../../servers/src/db/schema/stories.ts). Both Bible and ShotSpec schemaVersion are `1`; current rule set is `story-approval-2`.
 Story input is `{expectedStoryRevisionId, expectedStateVersion, content:{script,storyBible,scenes}}`. Existing shots carry `id` and `expectedShotRevisionId`; new scenes/shots carry unique `clientRef`, with IDs assigned by the server. Server strips optimistic Shot tokens from persisted creative content.
 Bounds: 1–10 nonempty scenes, at most ten total shots, shot durations integer 1–60s, script 20,000 chars, prompt 2,000, negative prompt 1,000, names 255, definition/continuity text 2,000, max 32 definitions per Bible group, keys max 64 chars, JSON request max 512KiB.
 Validation context participates in the evidence unique key. Persisted snapshot reads include scene/shot IDs, derived policies, revision/version tokens, findings, waiver reasons and approval evidence. Fixture proposal provenance is explicitly FIXTURE with liveInference=false; it is not paid provider output.
 
-Story Approval rule clarification: recurring character continuity retains its locked visual identity style. A style-reference change across adjacent appearances produces non-waivable IDENTITY_LOCK; a keyframe override cannot bypass it. Mark-planned/submit-review require valid structure and persist findings for review; only approve requires all ERROR findings resolved by correction, declared valid transitions or eligible waivers. After release, validation behavior changes require a new rule-set version; stored evidence cannot be overwritten under an existing version.
+Story Approval rule clarification: recurring character continuity retains its locked visual identity style. A style-reference change across ordered on-screen appearances produces non-waivable IDENTITY_LOCK; a keyframe override cannot bypass it. Mark-planned/submit-review require valid structure and persist findings for review; only approve requires all ERROR findings resolved by correction, declared valid transitions or eligible waivers. After release, validation behavior changes require a new rule-set version; stored evidence cannot be overwritten under an existing version.
+
+### Continuity ruleset v2 contract
+
+[DECIDED] `story-approval-2` is the current G1 ruleset. A recurring character's first ordered on-screen appearance (`subjectIds`) locks its `styleRefId` for every later appearance, including after B-roll and across Scene boundaries. Identity locks are non-waivable and cannot be bypassed by transitions or keyframe overrides.
+
+[DECIDED] SP-001 models one location per Shot. `ShotSpec.locationId`, `continuity.start.locationId`, and `continuity.end.locationId` must be equal. A location transition explains a cut between adjacent Shots; it never legitimizes contradictory location fields inside one Shot. Multi-location action within a Shot requires a future versioned contract or must be split into separate Shots.
+
+[DECIDED] An untargeted `intendedTransition` suppresses a continuity mismatch only when exactly one mismatch exists for that field on the adjacent-shot edge. If multiple characters mismatch the same field, the transition is ambiguous and suppresses none. `ShotSpec.schemaVersion` remains `1`; targeted transitions are deferred until justified by a separate contract change.
+
+[DECIDED] Validation evidence is immutable per ruleset, while current G1 validity is evaluated against the current ruleset. Approval evidence continues to resolve its exact validation run and version. A v1 approval remains historical evidence but does not establish G1 under v2. Revalidating an old revision creates separate v2 evidence; stale v1 policy/dependency bindings require a successor with v2 ShotRevision policies before approval.

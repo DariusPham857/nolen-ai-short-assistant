@@ -1,5 +1,5 @@
 # SP-001 tasks
-Status: IMPLEMENTED_VERIFIED_PENDING_REVIEW
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [Approved specification](spec.md)
 
 ## Tasks
@@ -14,10 +14,10 @@ Source: [Approved specification](spec.md)
 | SP-05 | REQUIRED: lifecycle/security/evidence; AT-SP-29/30 | PASS: authoritative approval evidence, edit race, Host/Origin/session/error envelope |
 | SP-06 | REQUIRED: storyboard UI | PASS: production browser canonical approval/history/mobile, draft/conflict recovery |
 | SP-07 | REQUIRED: fixture proposal provenance | PASS: FIXTURE provenance API + production UI acceptance |
-| SP-08 | REQUIRED: PG16/E2E/review and G1 handoff | Local acceptance and implementation CI PASS; independent/owner review PENDING |
+| SP-08 | REQUIRED: PG16/E2E/review and G1 handoff | PR #5 merged; ruleset-v2 patch local acceptance PASS; patch CI/owner sign-off PENDING |
 
 ## Handoff
-Baseline: main d099afbc2c1564ba1103b057a33eeb44de8163da, branch feature/story-planning.
+Baseline: main `fb44d24031f203f288b2c301df4362f599c54258` (PR #5 merged), patch branch `fix/story-continuity-ruleset-v2`.
 Registered files and per-task commands/results are recorded here as checks execute.
 Rollback: restore prior application only before SP data exists; after SP writes, preserve database/history and use a forward migration. Never remove applied migrations or reset user data.
 No finance/provider/queue/SSRF implementation. G2–G5 NOT_IMPLEMENTED.
@@ -31,11 +31,11 @@ No finance/provider/queue/SSRF implementation. G2–G5 NOT_IMPLEMENTED.
 - Tests: [domain](../../servers/src/stories/domain.test.ts), [Story PG16](../../servers/src/stories/story.integration.test.ts), [migration PG16](../../servers/src/db/migrate.integration.test.ts), retained FC/session/health regression suites.
 
 Mapping: FR-02/03/11 and scoped FR-14; DEC-P01/03/04. Existing C4 web/API/database topology retained; no container/service architecture change.
-Evidence: Windows, Node 22.23.0, pnpm 11.21.0, Docker PostgreSQL 16 test container at loopback port 55432. `pnpm test` PASS (3 contracts + 15 server unit tests); `pnpm lint`, `pnpm typecheck`, `pnpm build` PASS. `pnpm test:integration` PASS (21 tests, 4 files). `pnpm test:guardrails` PASS (4 negative/positive checks), `pnpm test:evidence` PASS (4 validator tests). Local evidence commands are not remote CI evidence.
+Evidence: Windows, Node 22.23.0, pnpm 11.21.0, Docker PostgreSQL 16 test container at loopback port 55432. Current patch evidence is registered below; local commands are not remote CI evidence.
 
 Source reconciliation: specs/spec.md → story-planning/spec.md (existing user text preserved and amended with owner-approved v1.1); PRD pilot 16:9 proposal → 9:16 (SP-D01). No new competing rule registry; other canonical rules unchanged.
 Failures fixed with evidence: waiver timestamp decoding (driver string rather than Date), JSONB receipt key-order comparison, explicit textarea label association. Browser setup respects the production login cooldown and reuses one UI-issued session; limiter unchanged.
-Next: complete SP-06–SP-08 browser/Compose checks, read-only review and publish PR. Independent reviewer/G1 owner acceptance remains pending.
+Next: publish and review the ruleset-v2 patch. G1 owner acceptance remains pending.
 
 ### SP-06–SP-07 registered files and evidence
 - [Storyboard](../../clients/components/storyboard.tsx) exports StoryboardWorkspace; Film route mounts it, Brief links to it and unlock redirect permits the protected Storyboard destination. Three-pane zinc/amber editor supports script/Bible/ShotSpec, continuity, keyframe override/transition reasons, accessible reorder, duplicate/remove/move and read-only history.
@@ -53,11 +53,11 @@ Use existing FC runbook/toolchain. `pnpm db:migrate` upgrades supported FC rows 
 
 ### SP-08 acceptance and review handoff
 - Backend implementation commit: `8f709ee`; UI/evidence commit follows it. Checks were executed against this complete working tree, including the UI changes.
-- Compose: `docker compose -p sp001-review up --build --detach --wait --wait-timeout 180` PASS (frozen lockfile install and production Linux build); `COMPOSE_PROJECT_NAME=sp001-review node scripts/compose-smoke.mjs` PASS. Migration completed before web/worker; only web port 127.0.0.1:3000 published, worker stopped before Film/Story creation/approval, approval and original Film persist through real web restart, logout remains revoked through restart.
-- QG-CODE PASS: lint, typecheck and build. QG-ARCH PASS: 4 guardrail tests plus 2 runtime/server-only tests. QG-DOMAIN PASS only for implemented G1 rules (18 combined contract/server unit tests). QG-INTEGRATION PASS: 21 PG16 tests and 10 production browser tests, plus Compose smoke. QG-EVIDENCE PASS: 4 evidence-validator tests and documentation links/structure checks.
+- Compose baseline and current patch acceptance are recorded in their respective handoffs below.
+- QG-CODE, QG-ARCH, QG-DOMAIN, QG-INTEGRATION and QG-EVIDENCE passed for the implemented G1 scope; exact current counts are recorded in the ruleset-v2 handoff.
 - NOT_IMPLEMENTED: paid LIVE planning, VIDEO_DISPATCH validation, financial admission/ledger, provider/jobs, media/export and G2–G5 release acceptance. No provider keys/calls required.
 - Read-only implementer review traced spec → contracts → API/auth → Film lock/receipts → snapshot/validation/approval → UI/retry and checked changed callers/tests. Findings fixed: waiver timestamp shape, canonical JSONB receipt comparison, textarea labeling, URL ID errors and actual stories/domain.ts import-restriction coverage. No remaining observed BLOCK or accepted CONTAIN exception; debt tracker unchanged.
-- Independent reviewer and owner G1 sign-off have NOT been supplied. Local CI-equivalent PASS does not substitute for them or for branch protection. Feature is ready for PR review, not marked DONE or merged.
+- The continuity follow-up review was accepted as patch scope, but post-implementation owner G1 sign-off has NOT been supplied. Local CI-equivalent PASS does not substitute for owner acceptance or remote patch CI.
 - Next dependency: review/accept SP-001, then plan the next approved generation/accounting slice; do not start deferred spikes automatically.
 
 Acceptance mapping (implemented evidence, independent acceptance still pending):
@@ -74,9 +74,12 @@ This mapping describes automated test scope, not independent acceptance of every
 Final review correction: recurring characters changing locked style now produce non-waivable IDENTITY_LOCK. Added tests prove a keyframe override cannot bypass it and that duplicate/remove preserves stable-ID history. Validation evidence checks persisted findings against authoritative recomputation before binding its ID to approval. A validation behavior change after release must bump the rule-set version; same-version evidence mismatch fails closed.
 Execution notes: initial sandbox network/artifact permissions required approved reruns with the same toolchain. A browser run was blocked by the test Compose project occupying port 3000; only that test project was stopped before rerunning. These were environment/test setup failures, not hidden source regressions or accepted product workarounds.
 
+### Continuity ruleset v2 patch handoff
+- **Registered files:** [domain](../../servers/src/stories/domain.ts) enforces story-wide subject identity, single-Shot location binding and unambiguous untargeted transitions; [repository](../../servers/src/stories/repository.ts) resolves approval-linked historical validation and current/fallback evidence; [contracts](../../packages/contracts/src/story.ts) adds `currentRuleSetVersion`; [Storyboard](../../clients/components/storyboard.tsx) synchronizes the single location and labels historical approval evidence. Spec, domain/PG16/browser tests and this handoff changed with them. No DDL, migration, dependency, C4 or debt record changed.
+- **Ruleset/evidence:** `story-approval-2` is current. V1 validation and approval remain immutable/readable; revalidation creates a distinct v2 row. Old policy bindings produce `POLICY_RESOLVED`, requiring a successor before approval v2. Approval metadata that cannot resolve its exact validation fails with `REVISION_INTEGRITY`.
+- **Verification:** `pnpm test` PASS (3 contract + 18 server tests); `pnpm test:integration` PASS (23 tests / 4 files on isolated PostgreSQL 16); `pnpm lint`, `pnpm typecheck`, `pnpm build` PASS; guardrails PASS 4/4; client runtime boundary PASS 2/2; evidence validators PASS 4/4 plus `check:evidence`; Playwright PASS 10/10; Compose production build/start and smoke PASS with migration ordering, worker independence, restart persistence and durable logout.
+- **Negative evidence:** failing tests first reproduced identity after cutaway/Scene, internal location contradiction and multi-character transition suppression. PG16 tests cover save 422/no partial write, legacy v1 read, separate v2 validation, v2 successor approval and corrupt approval metadata fail-closed.
+- **Review:** separate read-only diff/caller/test pass found and fixed the Storyboard location-editor conflict, stale v1 spec declaration and inaccurate save error text. No remaining observed BLOCK, CONTAIN exception or new technical debt. Test-only Compose project/volume and PostgreSQL container were removed; unrelated Docker resources and the original dirty checkout were untouched.
+
 ### Remote CI and publication handoff
-Implementation commit `4dc54c5b484b8ba715d139ebf2296a9a0a1baba9` verified by [GitHub Actions run 44690632291](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44690632291): overall SUCCESS, both `film` and `compose` SUCCESS. This subsequent documentation-only commit records that immutable implementation evidence; it does not change runtime code.
-
-Branch feature/story-planning pushed. PR creation is BLOCKED by GitHub connector permission (403 Resource not accessible by integration). Automatic approval review rejected reading stored Git credentials and inspecting an unrelated browser window; neither action was performed. No credential or browser-security settings changed. A local ignored .pr_draft.md contains the prepared PR body; compare feature/story-planning against main to review/create the PR. This publication blocker is not accepted technical debt and does not weaken any gate.
-
-Independent review/owner G1 acceptance still PENDING; no merge or DONE claim. Paid planning, VIDEO_DISPATCH and G2–G5 remain deferred. Test-only Docker resources are cleaned separately; no user database resets or WSL changes.
+SP-001 base PR #5 is merged at `fb44d24031f203f288b2c301df4362f599c54258`; its post-merge CI succeeded. The ruleset-v2 patch is on `fix/story-continuity-ruleset-v2`; remote patch CI and PR review are pending until publication. Owner G1 acceptance remains PENDING, so SP-001 is not marked DONE. Paid planning, VIDEO_DISPATCH and G2–G5 remain deferred.

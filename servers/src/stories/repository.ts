@@ -9,6 +9,7 @@ import { hash, policy, referenceErrors, RULESET, shotDependency, validate } from
 type Tx=postgres.TransactionSql;
 const storedSchema=z.object({content:storyContentSchema,shotRevisions:z.record(z.object({id:z.string().uuid(),dependencyHash:z.string(),policy:policySchema}))});
 type RevisionRow={id:string;parent_id:string|null;revision_no:number;state:string;state_version:number;content_hash:string;content:unknown};
+type ValidationRow={id:string;story_revision_id:string;context:'STORY_APPROVAL';dependency_hash:string;rule_set_version:string;findings:Validation['findings']};
 export type Receipt={storyRevisionId:string;state:string;stateVersion:number;contentHash:string};
 /** Decode persisted content before returning it to an operator. */
 function snapshot(row:RevisionRow):StorySnapshot {
@@ -18,9 +19,15 @@ function snapshot(row:RevisionRow):StorySnapshot {
 function checkExpected(active:StorySnapshot|null,expected:Expected):void {
   if((active?.id??null)!==expected.expectedStoryRevisionId || (active?.stateVersion??0)!==expected.expectedStateVersion)throw new ApiFailure(409,'VERSION_CONFLICT','Reload the current storyboard before changing it');
 }
+function validationDependency(r:StorySnapshot,target:number,ruleSetVersion:string):string {
+  return hash({content:r.content,shots:r.shotRevisions,target,context:'STORY_APPROVAL',ruleSetVersion});
+}
+function validationDto(row:ValidationRow):Validation {
+  return {id:row.id,context:row.context,dependencyHash:row.dependency_hash,ruleSetVersion:row.rule_set_version,findings:row.findings};
+}
 /** Validation is deterministic persisted evidence, never a command receipt or lifecycle mutation. */
 async function validation(tx:Tx,r:StorySnapshot,target:number):Promise<Validation> {
-  const dependencyHash=hash({content:r.content,shots:r.shotRevisions,target,context:'STORY_APPROVAL',ruleSetVersion:RULESET});
+  const dependencyHash=validationDependency(r,target,RULESET);
   const findings=validate(r.content,target);
   if(hash({content:r.content,shotRevisions:r.shotRevisions})!==r.contentHash)throw new ApiFailure(409,'REVISION_INTEGRITY','Stored content does not match its revision hash');
   for(const shot of r.content.scenes.flatMap(s=>s.shots)){
@@ -51,7 +58,7 @@ export async function command(filmId:string,operator:string,key:string|null,kind
     if(kind==='save'){
       if(!input.content)throw new ApiFailure(422,'VALIDATION_ERROR','Story content required');
       const errors=referenceErrors(input.content);
-      if(errors.length)throw new ApiFailure(422,'VALIDATION_ERROR','Resolve Bible references',errors);
+      if(errors.length)throw new ApiFailure(422,'VALIDATION_ERROR','Resolve Story references and structural errors',errors);
       const content=structuredClone(input.content);
       const knownScenes=await tx<{id:string}[]>`SELECT id FROM scenes WHERE film_id=${filmId}`;
       const knownShots=await tx<{id:string}[]>`SELECT id FROM shots WHERE film_id=${filmId}`;
@@ -124,9 +131,24 @@ export async function readStoryboard(filmId:string,operator:string,revisionId?:s
     const activeRow=rows.find(r=>r.id===film.active_story_revision_id);const selected=revisionId?rows.find(r=>r.id===revisionId):activeRow;
     if(revisionId&&!selected)throw new ApiFailure(404,'REVISION_NOT_FOUND','Revision not found');
     const revision=selected?snapshot(selected):null;
-    const [v]=selected?await tx<{id:string;context:'STORY_APPROVAL';dependency_hash:string;rule_set_version:string;findings:Validation['findings']}[]>`SELECT * FROM story_validations WHERE story_revision_id=${selected.id} AND context='STORY_APPROVAL' AND rule_set_version=${RULESET}`:[];
     const ws=selected?await tx<{id:string;finding_fingerprint:string;reason:string}[]>`SELECT * FROM story_waivers WHERE story_revision_id=${selected.id} ORDER BY id`:[];
     const [approval]=selected?await tx<{evidence:Record<string,unknown>}[]>`SELECT evidence FROM story_approvals WHERE story_revision_id=${selected.id}`:[];
-    return {active:activeRow?snapshot(activeRow):null,revision,history:rows.map(r=>({id:r.id,revisionNo:r.revision_no,state:storyStateSchema.parse(r.state)})),validation:v?{id:v.id,context:v.context,dependencyHash:v.dependency_hash,ruleSetVersion:v.rule_set_version,findings:v.findings}:null,waivers:ws.map(w=>({id:w.id,findingFingerprint:w.finding_fingerprint,reason:w.reason})),approval:approval?.evidence??null};
+    let v:ValidationRow|undefined;
+    if(revision && approval){
+      const evidence=z.object({storyRevisionId:z.string().uuid(),contentHash:z.string(),dependencyHash:z.string(),ruleSetVersion:z.string(),validationRunId:z.string().uuid()}).passthrough().safeParse(approval.evidence);
+      if(!evidence.success || evidence.data.storyRevisionId!==revision.id || evidence.data.contentHash!==revision.contentHash)throw new ApiFailure(409,'REVISION_INTEGRITY','Approval evidence does not match its StoryRevision');
+      [v]=await tx<ValidationRow[]>`SELECT * FROM story_validations WHERE id=${evidence.data.validationRunId} AND story_revision_id=${revision.id} AND context='STORY_APPROVAL'`;
+      if(!v || v.dependency_hash!==evidence.data.dependencyHash || v.rule_set_version!==evidence.data.ruleSetVersion)throw new ApiFailure(409,'REVISION_INTEGRITY','Approval validation evidence is missing or inconsistent');
+    }else if(revision){
+      const currentDependency=validationDependency(revision,film.duration_target_seconds,RULESET);
+      [v]=await tx<ValidationRow[]>`SELECT * FROM story_validations WHERE story_revision_id=${revision.id} AND context='STORY_APPROVAL' AND dependency_hash=${currentDependency} AND rule_set_version=${RULESET}`;
+      if(!v){
+        const policyVersions=new Set(Object.values(revision.shotRevisions).map(s=>s.policy.ruleSetVersion));
+        if(policyVersions.size!==1)throw new ApiFailure(409,'REVISION_INTEGRITY','StoryRevision contains inconsistent policy rule-set versions');
+        const [storedVersion]=policyVersions;const storedDependency=validationDependency(revision,film.duration_target_seconds,storedVersion);
+        [v]=await tx<ValidationRow[]>`SELECT * FROM story_validations WHERE story_revision_id=${revision.id} AND context='STORY_APPROVAL' AND dependency_hash=${storedDependency} AND rule_set_version=${storedVersion}`;
+      }
+    }
+    return {active:activeRow?snapshot(activeRow):null,revision,history:rows.map(r=>({id:r.id,revisionNo:r.revision_no,state:storyStateSchema.parse(r.state)})),currentRuleSetVersion:RULESET,validation:v?validationDto(v):null,waivers:ws.map(w=>({id:w.id,findingFingerprint:w.finding_fingerprint,reason:w.reason})),approval:approval?.evidence??null};
   });
 }

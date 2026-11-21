@@ -30,7 +30,7 @@ async function save(page:Page){await page.getByRole('button',{name:'Save new rev
 test('canonical 45s/eight-shot approval persists; edits fork history, mobile remains usable',async({page})=>{
   const id=await open(page);await fixture(page);
   await expect(page.getByText('45s · 8 shots · 9:16',{exact:true})).toBeVisible();await save(page);
-  await expect(page.getByText('Keyframe: REQUIRED',{exact:true})).toBeVisible();
+  await expect(page.getByText('Keyframe: REQUIRED',{exact:true})).toBeVisible();await expect(page.getByText('No blocking findings under story-approval-2.',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Mark planned',exact:true}).click();await expect(page.getByTestId('story-state')).toHaveText('PLANNED');
   await page.getByRole('button',{name:'Submit for review',exact:true}).click();await expect(page.getByTestId('story-state')).toHaveText('IN_REVIEW');
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Approve story',exact:true}).click();
@@ -43,7 +43,7 @@ test('canonical 45s/eight-shot approval persists; edits fork history, mobile rem
   await page.getByRole('button',{name:'Reload current revision',exact:true}).click();await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Updated shot after approval');
   await page.setViewportSize({width:390,height:844});await expect(page.getByRole('button',{name:'Move shot down',exact:true})).toBeVisible();
   await page.screenshot({path:test.info().outputPath('story-mobile.png'),fullPage:true});
-  const read=await page.request.get(`/api/films/${id}/storyboard`);const board=await read.json() as Storyboard;expect(board.history).toHaveLength(2);
+  const read=await page.request.get(`/api/films/${id}/storyboard`);const board=await read.json() as Storyboard;expect(board.history).toHaveLength(2);expect(board.currentRuleSetVersion).toBe('story-approval-2');
 });
 
 test('lost response preserves pending key/payload across reload and retry creates no duplicate revision',async({page})=>{

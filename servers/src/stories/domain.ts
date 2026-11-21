@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { StoryContent, ShotSpec, Policy, Finding } from '@nolen/contracts';
 
-export const RULESET = 'story-approval-1';
+export const RULESET = 'story-approval-2';
 /** Sorted object keys make hashes independent of JSON property insertion order. Arrays retain story order. */
 export function canonical(value:unknown):string {
   if(Array.isArray(value))return `[${value.map(canonical).join(',')}]`;
@@ -22,6 +22,7 @@ export function referenceErrors(content:StoryContent):string[] {
     s.subjectIds.forEach(id=>check('characters',id,`shots.${i}.subjectIds`));
     for(const side of ['start','end'] as const){
       const v=s.continuity[side];check('locations',v.locationId,`shots.${i}.${side}`);
+      if(v.locationId!==s.locationId)errors.push(`shots.${i}.${side}.locationId: must match shots.${i}.locationId`);
       v.propIds.forEach(id=>check('props',id,`shots.${i}.${side}.propIds`));
       if(new Set(v.characterStates.map(c=>c.characterId)).size!==v.characterStates.length)errors.push(`shots.${i}.${side}: duplicate character`);
       for(const c of v.characterStates){check('characters',c.characterId,`shots.${i}.${side}`);check('wardrobes',c.wardrobeId,`shots.${i}.${side}`);c.heldPropIds.forEach(id=>check('props',id,`shots.${i}.${side}`));}
@@ -61,19 +62,37 @@ export function validate(content:StoryContent,target:number):Finding[] {
   const duration=shots.reduce((sum,s)=>sum+s.spec.durationSeconds,0);
   if(duration<30 || duration>60)add('DURATION_RANGE','duration',`Total ${duration}s must be 30–60s`);
   else if(duration!==target)add('TARGET_DURATION','duration',`Total ${duration}s differs from target ${target}s`,false,'WARNING');
+  const lockedStyles=new Map<string,string>();
+  for(const [i,shot] of shots.entries()){
+    for(const characterId of shot.spec.subjectIds){
+      const locked=lockedStyles.get(characterId);
+      if(locked===undefined)lockedStyles.set(characterId,shot.spec.styleRefId);
+      else if(locked!==shot.spec.styleRefId)add('IDENTITY_LOCK',`shots.${i}.styleRefId`,'A recurring character must retain the locked visual identity style');
+    }
+  }
   for(let i=1;i<shots.length;i++){
     const previous=shots[i-1].spec.continuity.end;const next=shots[i].spec.continuity.start;
-    if(shots[i-1].spec.styleRefId!==shots[i].spec.styleRefId && previous.characterStates.some(c=>next.characterStates.some(n=>n.characterId===c.characterId)))add('IDENTITY_LOCK',`shots.${i}.styleRefId`,'A recurring character must retain the locked visual identity style');
     const transitions=shots[i].spec.intendedTransitions;
-    const compare=(field:'wardrobe'|'heldProps'|'pose'|'location'|'lighting'|'props',a:unknown,b:unknown,waivable=false,suffix='')=>{
-      if(canonical(a)!==canonical(b) && !transitions.some(t=>t.field===field))add(field==='wardrobe'||field==='heldProps'?'WARDROBE_PROP':field==='pose'?'TEMPORAL_STATE':'LOCATION_LIGHTING',`shots.${i}.continuity.${field}${suffix}`,`${field} differs across shot ${i} → ${i+1}${suffix}`,waivable);
-    };
-    compare('location',previous.locationId,next.locationId);compare('lighting',previous.lighting,next.lighting);compare('props',[...previous.propIds].sort(),[...next.propIds].sort());
+    type EdgeMismatch={field:'wardrobe'|'heldProps'|'pose'|'location'|'lighting'|'props';a:unknown;b:unknown;waivable:boolean;suffix:string};
+    const candidates:EdgeMismatch[]=[
+      {field:'location',a:previous.locationId,b:next.locationId,waivable:false,suffix:''},
+      {field:'lighting',a:previous.lighting,b:next.lighting,waivable:false,suffix:''},
+      {field:'props',a:[...previous.propIds].sort(),b:[...next.propIds].sort(),waivable:false,suffix:''},
+    ];
     for(const before of previous.characterStates){
       const after=next.characterStates.find(c=>c.characterId===before.characterId);if(!after)continue;
-      compare('wardrobe',before.wardrobeId,after.wardrobeId,true,`.${before.characterId}`);
-      compare('heldProps',[...before.heldPropIds].sort(),[...after.heldPropIds].sort(),true,`.${before.characterId}`);
-      compare('pose',before.pose,after.pose,false,`.${before.characterId}`);
+      candidates.push(
+        {field:'wardrobe',a:before.wardrobeId,b:after.wardrobeId,waivable:true,suffix:`.${before.characterId}`},
+        {field:'heldProps',a:[...before.heldPropIds].sort(),b:[...after.heldPropIds].sort(),waivable:true,suffix:`.${before.characterId}`},
+        {field:'pose',a:before.pose,b:after.pose,waivable:false,suffix:`.${before.characterId}`},
+      );
+    }
+    const mismatches=candidates.filter(x=>canonical(x.a)!==canonical(x.b));
+    for(const mismatch of mismatches){
+      const unambiguous=mismatches.filter(x=>x.field===mismatch.field).length===1;
+      if(unambiguous && transitions.some(t=>t.field===mismatch.field))continue;
+      const code=mismatch.field==='wardrobe'||mismatch.field==='heldProps'?'WARDROBE_PROP':mismatch.field==='pose'?'TEMPORAL_STATE':'LOCATION_LIGHTING';
+      add(code,`shots.${i}.continuity.${mismatch.field}${mismatch.suffix}`,`${mismatch.field} differs across shot ${i} → ${i+1}${mismatch.suffix}`,mismatch.waivable);
     }
   }
   return findings;
