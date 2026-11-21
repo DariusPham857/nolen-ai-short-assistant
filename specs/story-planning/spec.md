@@ -1,11 +1,11 @@
 # SP-001 — Story Planning & Approval (G1) — Feature Specification
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: G1_ACCEPTED
 Source: [PRD v1.0](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
-**Status:** `IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` — base implementation merged; continuity ruleset-v2 local acceptance passed; remote patch CI and owner G1 sign-off pending
+**Status:** `G1_ACCEPTED` — PR #6 merged, merge CI passed, independent acceptance found no BLOCK, and the project owner accepted G1 on 2026-11-21
 **Prepared:** 2026-11-20
-**Repository baseline:** `main@d099afbc2c1564ba1103b057a33eeb44de8163da` (FC-001 merged)
+**Repository baseline:** `main@d4e59c38838776982bf3c5a9fc8be4433eef34b2` (PR #6 merged)
 **Owner:** Producer / project owner (implementation authorized 2026-11-20)
 **Traceability:** `FR-02`, `FR-03`, `FR-11`, scoped `FR-14`; `MVP-01`, `MVP-02`, `MVP-03`; `DEC-P01`, `DEC-P03`, `DEC-P04`, `DEC-P09`; release gate **G1 Story Ready**.
 **Primary sources:** [PRD v1.0](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md) (§§5, 16, 19, 21, 29, 30), [FC-001](../film-creation/spec.md), [AGENTS.md](../../AGENTS.md), [engineering workflow](../../.agents/rules/plan-breakdown-handoff.md), [C4](../../docs/C4-Model/C4_MODEL_ARCHITECTURE.md), [UI workflow](../../docs/design/UI_DESIGN_WORKFLOW.md).
@@ -215,7 +215,7 @@ The following are **planned tests, not executed PASS evidence**. Record command,
 
 ## 12. Definition of Done and handoff
 
-**SP-001 implementation DoD (future, not currently satisfied):** authorized immutable story/shot plan and deterministic P0 continuity validation; producer approval exactly bound to active version; all required `AT-SP` cases pass at their test layers; additive migration with data-preserving catalog checks; FC-001 behavior remains intact; clear browser state and no fabricated financial/AI results; independent read-only code review; owner sign-off; relevant files/interfaces and commands/results registered in `specs/story-planning/tasks.md`.
+**SP-001 implementation DoD:** satisfied for the G1 scope at `main@d4e59c38838776982bf3c5a9fc8be4433eef34b2`: immutable story/shot planning, deterministic P0 continuity validation, revision-bound approval, required automated evidence, additive migration checks, FC-001 regression coverage, independent read-only review and owner sign-off are recorded in [tasks](tasks.md).
 
 **G1 pass** needs approved canonical film package and acceptance evidence from the correct active StoryRevision. **Full AI planning LIVE** and **G2–G5** remain separately gated. Green docs/CI on this draft alone is not feature completion.
 
@@ -256,7 +256,7 @@ SP-D04/06: contracts below approved together with Implementation Plan v1.1.
 AT-SP-01–26 above plus AT-SP-27 guard drift, AT-SP-28 Bible invalidation, AT-SP-29 approval/waiver/edit races, AT-SP-30 shared security. PG16 tests cover same-key replay and distinct-key concurrency, direct SQL immutability and legal lifecycle updates. Browser evidence covers canonical approval/reload, editable history and uncertain retry. No generation side effects.
 
 ## Open Questions / Blocked Contracts
-No remaining implementation contract decisions. VIDEO_DISPATCH, paid inference and G2–G5 remain deferred, not passed. Acceptance and independent review remain pending until executed.
+No remaining G1 implementation contract decisions. VIDEO_DISPATCH, paid inference and G2–G5 remain deferred, not passed. G1 acceptance and independent review completed on 2026-11-21; their evidence is recorded in [tasks](tasks.md).
 
 
 ### Frozen transport details

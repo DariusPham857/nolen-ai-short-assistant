@@ -11,7 +11,7 @@ export const scenes = pgTable('scenes',{id:uuid().primaryKey(),filmId:uuid('film
 export const shots = pgTable('shots',{id:uuid().primaryKey(),filmId:uuid('film_id').notNull().references(()=>films.id)},t=>[unique().on(t.filmId,t.id)]);
 export const shotRevisions = pgTable('shot_revisions',{
   id:uuid().primaryKey(),filmId:uuid('film_id').notNull(),shotId:uuid('shot_id').notNull(),spec:jsonb().notNull(),dependencyHash:text('dependency_hash').notNull(),policy:jsonb().notNull(),
-},t=>[unique().on(t.filmId,t.shotId,t.id),foreignKey({columns:[t.filmId,t.shotId],foreignColumns:[shots.filmId,shots.id]})]);
+},t=>[unique().on(t.filmId,t.id),unique().on(t.filmId,t.shotId,t.id),foreignKey({columns:[t.filmId,t.shotId],foreignColumns:[shots.filmId,shots.id]})]);
 export const storyRevisionScenes = pgTable('story_revision_scenes',{
   filmId:uuid('film_id').notNull(),storyRevisionId:uuid('story_revision_id').notNull(),sceneId:uuid('scene_id').notNull(),position:integer().notNull(),
 },t=>[unique().on(t.filmId,t.storyRevisionId,t.sceneId),unique().on(t.storyRevisionId,t.position),foreignKey({columns:[t.filmId,t.storyRevisionId],foreignColumns:[storyRevisions.filmId,storyRevisions.id]}),foreignKey({columns:[t.filmId,t.sceneId],foreignColumns:[scenes.filmId,scenes.id]})]);

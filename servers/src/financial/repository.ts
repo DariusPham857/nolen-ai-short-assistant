@@ -1,0 +1,185 @@
+import { createHash, randomUUID } from 'node:crypto';
+import type postgres from 'postgres';
+import type { CreateAttempt, EstimateAttempt, ReconcileAttempt, UpdateBudget } from '@nolen/contracts';
+import { pgClient } from '../db/index.js';
+import { ApiFailure } from '../http/errors.js';
+import { add, assertAdmission, estimate, projection, subtract, type Projection, type Rate } from './domain.js';
+
+type Tx = postgres.TransactionSql;
+type AccountRow = {
+  film_id: string; operator_id: string; budget_limit_usd_micros: string;
+  actual_spent_usd_micros: string; reserved_open_usd_micros: string;
+  pending_liability_usd_micros: string; version: number;
+};
+type RateRow = {
+  id: string; provider: string; model: string; operation: string;
+  rate_type: Rate['rateType']; unit_price_usd_micros: string;
+  provider_maximum_usd_micros: string | null; effective_at: Date|string; expires_at: Date|string;
+};
+type FinancialRow = {
+  attempt_id: string; film_id: string; state: string; rate_card_snapshot_id: string;
+  reservation_usd_micros: string;
+  billing_status: 'PENDING'|'PARTIAL'|'FINAL'|'DISPUTED'; reservation_open_usd_micros: string;
+  realized_usd_micros: string; pending_liability_usd_micros: string;
+  outbox_status: 'PENDING'|'DELIVERING'|'DELIVERED';
+  enqueue_outcome: 'NOT_ATTEMPTED'|'JOB_ID'|'NULL_UNVERIFIED'|'UNKNOWN_ENQUEUE_OUTCOME'|'WORKER_CONFIRMED';
+};
+
+export type AttemptReceipt = {
+  attemptId: string; filmId: string; state: 'QUEUED'; billingStatus: 'PENDING';
+  reservationUsdMicros: string; outboxStatus: 'PENDING';
+};
+
+function digest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function accountProjection(row: AccountRow): Projection {
+  return { budgetLimitUsdMicros: BigInt(row.budget_limit_usd_micros), actualSpentUsdMicros: BigInt(row.actual_spent_usd_micros),
+    reservedOpenUsdMicros: BigInt(row.reserved_open_usd_micros), pendingLiabilityUsdMicros: BigInt(row.pending_liability_usd_micros) };
+}
+
+function projectionDto(row: AccountRow) {
+  const value = projection(accountProjection(row));
+  return { ...Object.fromEntries(Object.entries(value).map(([key,item]) => [key, typeof item === 'bigint' ? item.toString() : item])) };
+}
+
+function rateValue(row: RateRow): Rate {
+  return { id:row.id, rateType:row.rate_type, unitPriceUsdMicros:BigInt(row.unit_price_usd_micros),
+    providerMaximumUsdMicros:row.provider_maximum_usd_micros===null?null:BigInt(row.provider_maximum_usd_micros),
+    effectiveAt:new Date(row.effective_at), expiresAt:new Date(row.expires_at) };
+}
+
+async function ownedAccount(tx: Tx, filmId: string, operatorId: string, lock: boolean): Promise<AccountRow> {
+  const rows = lock
+    ? await tx<AccountRow[]>`SELECT a.* FROM film_budget_accounts a JOIN films f ON f.id=a.film_id WHERE a.film_id=${filmId} AND f.operator_id=${operatorId} FOR UPDATE OF a`
+    : await tx<AccountRow[]>`SELECT a.* FROM film_budget_accounts a JOIN films f ON f.id=a.film_id WHERE a.film_id=${filmId} AND f.operator_id=${operatorId}`;
+  if (!rows[0]) throw new ApiFailure(404,'FILM_NOT_FOUND','Film not found');
+  return rows[0];
+}
+
+async function loadRate(tx: Tx, id: string): Promise<RateRow> {
+  const [row] = await tx<RateRow[]>`SELECT * FROM rate_card_snapshots WHERE id=${id}`;
+  if (!row) throw new ApiFailure(422,'RATE_CARD_REQUIRED','Select a supported rate-card snapshot');
+  return row;
+}
+
+async function receipt<T>(tx: Tx, filmId:string, operatorId:string, key:string, command:string, requestHash:string):Promise<T|null> {
+  const [row] = await tx<{command:string;request_hash:string;response:T}[]>`SELECT command,request_hash,response FROM financial_command_receipts WHERE film_id=${filmId} AND operator_id=${operatorId} AND key=${key}`;
+  if (!row) return null;
+  if (row.command!==command || row.request_hash!==requestHash) throw new ApiFailure(409,'IDEMPOTENCY_CONFLICT','Key was used for another financial command');
+  return row.response;
+}
+
+async function saveReceipt(tx:Tx,filmId:string,operatorId:string,key:string,command:string,requestHash:string,response:unknown) {
+  await tx`INSERT INTO financial_command_receipts(id,film_id,operator_id,key,command,request_hash,response)
+    VALUES(${randomUUID()},${filmId},${operatorId},${key},${command},${requestHash},${JSON.stringify(response)}::jsonb)`;
+}
+
+export async function readBudget(filmId:string,operatorId:string) {
+  return pgClient.begin('isolation level read committed read only', async tx => projectionDto(await ownedAccount(tx,filmId,operatorId,false)));
+}
+
+export async function estimateAttempt(filmId:string,operatorId:string,input:EstimateAttempt) {
+  return pgClient.begin('isolation level read committed read only', async tx => {
+    await ownedAccount(tx,filmId,operatorId,false);
+    const row=await loadRate(tx,input.rateCardSnapshotId);const calculated=estimate(rateValue(row),input.pricingUnits);
+    return {rateCardSnapshotId:row.id,baseEstimateUsdMicros:calculated.baseEstimateUsdMicros.toString(),reservationUsdMicros:calculated.reservationUsdMicros.toString(),rateType:row.rate_type,expiresAt:new Date(row.expires_at).toISOString()};
+  });
+}
+
+/** Atomically change a limit and its immutable audit event. */
+export async function changeBudget(filmId:string,operatorId:string,key:string,input:UpdateBudget) {
+  const requestHash=digest(input);
+  return pgClient.begin('isolation level read committed',async tx=>{
+    const account=await ownedAccount(tx,filmId,operatorId,true);
+    const replay=await receipt<ReturnType<typeof projectionDto>>(tx,filmId,operatorId,key,'CHANGE_BUDGET',requestHash);
+    if(replay)return replay;
+    const next=BigInt(input.budgetLimitUsdMicros);const committed=add(BigInt(account.actual_spent_usd_micros),BigInt(account.reserved_open_usd_micros));
+    if(next<committed)throw new ApiFailure(409,'BUDGET_BELOW_COMMITTED','New limit cannot be below spent plus open reservations');
+    const nextValue=next.toString();
+    await tx`UPDATE film_budget_accounts SET budget_limit_usd_micros=${nextValue},version=version+1,updated_at=now() WHERE film_id=${filmId}`;
+    await tx`UPDATE films SET budget_limit_usd_micros=${nextValue},updated_at=now() WHERE id=${filmId}`;
+    await tx`INSERT INTO budget_limit_events(id,film_id,actor_id,prior_limit_usd_micros,new_limit_usd_micros,reason) VALUES(${randomUUID()},${filmId},${operatorId},${account.budget_limit_usd_micros},${nextValue},${input.reason})`;
+    const updated={...account,budget_limit_usd_micros:next.toString(),version:account.version+1};const response=projectionDto(updated);
+    await saveReceipt(tx,filmId,operatorId,key,'CHANGE_BUDGET',requestHash,response);return response;
+  });
+}
+
+/** One transaction creates Attempt, reservation journal, projection, receipt and dispatch intent. */
+export async function admitAttempt(filmId:string,operatorId:string,key:string,input:CreateAttempt):Promise<AttemptReceipt> {
+  const requestHash=digest(input);
+  return pgClient.begin('isolation level read committed',async tx=>{
+    const account=await ownedAccount(tx,filmId,operatorId,true);
+    const replay=await receipt<AttemptReceipt>(tx,filmId,operatorId,key,'ADMIT_ATTEMPT',requestHash);
+    if(replay)return replay;
+    const [story]=await tx<{id:string}[]>`SELECT id FROM story_revisions WHERE id=${input.storyRevisionId} AND film_id=${filmId} AND state='APPROVED'`;
+    if(!story)throw new ApiFailure(409,'APPROVED_STORY_REQUIRED','Attempt requires an approved StoryRevision in this Film');
+    if(['IMAGE','VIDEO'].includes(input.kind) && !input.shotRevisionId)throw new ApiFailure(422,'SHOT_REVISION_REQUIRED','Image and video attempts require a ShotRevision');
+    if(input.shotRevisionId){
+      const [shot]=await tx<{id:string}[]>`SELECT sr.id FROM shot_revisions sr JOIN story_revision_shots m ON m.film_id=sr.film_id AND m.shot_revision_id=sr.id WHERE sr.id=${input.shotRevisionId} AND sr.film_id=${filmId} AND m.story_revision_id=${input.storyRevisionId}`;
+      if(!shot)throw new ApiFailure(422,'SHOT_REVISION_MISMATCH','ShotRevision is not part of the approved StoryRevision');
+    }
+    const rate=await loadRate(tx,input.rateCardSnapshotId);
+    if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');
+    const calculated=estimate(rateValue(rate),input.pricingUnits);
+    assertAdmission(accountProjection(account),calculated.reservationUsdMicros);
+    const committed=add(BigInt(account.actual_spent_usd_micros),BigInt(account.reserved_open_usd_micros),calculated.reservationUsdMicros);
+    if(committed>BigInt(account.budget_limit_usd_micros))throw new ApiFailure(409,'BUDGET_EXCEEDED','Budget reservation would exceed the Film limit');
+    const attemptId=randomUUID();
+    const reservationValue=calculated.reservationUsdMicros.toString();
+    await tx`INSERT INTO attempts(id,film_id,story_revision_id,shot_revision_id,kind,provider,model,rate_card_snapshot_id,pricing_units,reservation_usd_micros)
+      VALUES(${attemptId},${filmId},${input.storyRevisionId},${input.shotRevisionId},${input.kind},${rate.provider},${rate.model},${rate.id},${input.pricingUnits},${reservationValue})`;
+    await tx`INSERT INTO attempt_financial_state(attempt_id,reservation_open_usd_micros) VALUES(${attemptId},${reservationValue})`;
+    await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at)
+      VALUES(${randomUUID()},${filmId},${attemptId},'RESERVATION_CREATED',${reservationValue},'PENDING',${JSON.stringify({rateCardSnapshotId:rate.id,pricingUnits:input.pricingUnits})}::jsonb,clock_timestamp())`;
+    await tx`UPDATE film_budget_accounts SET reserved_open_usd_micros=reserved_open_usd_micros+${reservationValue},version=version+1,updated_at=now() WHERE film_id=${filmId}`;
+    await tx`INSERT INTO dispatch_outbox(id,attempt_id,queue_name,payload) VALUES(${randomUUID()},${attemptId},'generation:dispatch',${JSON.stringify({attemptId})}::jsonb)`;
+    const response:AttemptReceipt={attemptId,filmId,state:'QUEUED',billingStatus:'PENDING',reservationUsdMicros:calculated.reservationUsdMicros.toString(),outboxStatus:'PENDING'};
+    await saveReceipt(tx,filmId,operatorId,key,'ADMIT_ATTEMPT',requestHash,response);return response;
+  });
+}
+
+function financialDto(row:FinancialRow){return {attemptId:row.attempt_id,filmId:row.film_id,state:row.state,billingStatus:row.billing_status,
+  reservationOpenUsdMicros:String(row.reservation_open_usd_micros),realizedUsdMicros:String(row.realized_usd_micros),pendingLiabilityUsdMicros:String(row.pending_liability_usd_micros),
+  rateCardSnapshotId:row.rate_card_snapshot_id,outboxStatus:row.outbox_status,enqueueOutcome:row.enqueue_outcome};}
+
+async function financialRow(tx:Tx,attemptId:string,operatorId:string,lock:boolean):Promise<FinancialRow>{
+  const suffix=lock?' FOR UPDATE OF fs':'';
+  const rows=await tx.unsafe<FinancialRow[]>(`SELECT a.id AS attempt_id,a.film_id,a.state,a.rate_card_snapshot_id,a.reservation_usd_micros,fs.billing_status,fs.reservation_open_usd_micros,fs.realized_usd_micros,fs.pending_liability_usd_micros,o.status AS outbox_status,o.enqueue_outcome FROM attempts a JOIN films f ON f.id=a.film_id JOIN attempt_financial_state fs ON fs.attempt_id=a.id JOIN dispatch_outbox o ON o.attempt_id=a.id WHERE a.id=$1 AND f.operator_id=$2${suffix}`,[attemptId,operatorId]);
+  if(!rows[0])throw new ApiFailure(404,'ATTEMPT_NOT_FOUND','Attempt not found');return rows[0];
+}
+
+export async function readAttemptFinancial(attemptId:string,operatorId:string){return pgClient.begin('isolation level read committed read only',async tx=>financialDto(await financialRow(tx,attemptId,operatorId,false)));}
+
+/** Reconcile cumulative billing evidence; retries are durable command replays. */
+export async function reconcileAttempt(attemptId:string,operatorId:string,key:string,input:ReconcileAttempt){
+  const requestHash=digest(input);
+  return pgClient.begin('isolation level read committed',async tx=>{
+    const current=await financialRow(tx,attemptId,operatorId,true);const account=await ownedAccount(tx,current.film_id,operatorId,true);
+    const replay=await receipt<ReturnType<typeof financialDto>>(tx,current.film_id,operatorId,key,'RECONCILE_ATTEMPT',requestHash);if(replay)return replay;
+    const oldRealized=BigInt(current.realized_usd_micros),oldOpen=BigInt(current.reservation_open_usd_micros),oldPending=BigInt(current.pending_liability_usd_micros);
+    const nextRealized=BigInt(input.realizedChargeUsdMicros),nextPending=BigInt(input.pendingLiabilityUsdMicros);
+    if(input.billingStatus==='FINAL'&&nextPending!==0n)throw new ApiFailure(422,'FINAL_BILLING_HAS_PENDING','Final billing cannot retain a pending liability');
+    const originalReservation=BigInt(current.reservation_usd_micros);
+    const nextOpen=input.billingStatus==='FINAL'?0n:(nextRealized>=originalReservation?0n:subtract(originalReservation,nextRealized));
+    const spent=add(BigInt(account.actual_spent_usd_micros),nextRealized-oldRealized);
+    const reserved=add(BigInt(account.reserved_open_usd_micros),nextOpen-oldOpen);
+    const pending=add(BigInt(account.pending_liability_usd_micros),nextPending-oldPending);
+    projection({budgetLimitUsdMicros:BigInt(account.budget_limit_usd_micros),actualSpentUsdMicros:spent,reservedOpenUsdMicros:reserved,pendingLiabilityUsdMicros:pending});
+    if(nextRealized!==oldRealized)await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at) VALUES(${randomUUID()},${current.film_id},${attemptId},${nextRealized>oldRealized?'CHARGE_POSTED':'CHARGE_CORRECTED'},${(nextRealized-oldRealized).toString()},${input.billingStatus},${JSON.stringify({evidenceRef:input.evidenceRef})}::jsonb,GREATEST(clock_timestamp(),COALESCE((SELECT max(created_at)+interval '1 microsecond' FROM cost_ledger_events WHERE attempt_id=${attemptId}),'-infinity'::timestamptz)))`;
+    if(nextOpen!==oldOpen)await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at) VALUES(${randomUUID()},${current.film_id},${attemptId},${nextOpen<oldOpen?'RESERVATION_RELEASED':'RESERVATION_ADJUSTED'},${(nextOpen<oldOpen?oldOpen-nextOpen:nextOpen-oldOpen).toString()},${input.billingStatus},${JSON.stringify({evidenceRef:input.evidenceRef})}::jsonb,GREATEST(clock_timestamp(),COALESCE((SELECT max(created_at)+interval '1 microsecond' FROM cost_ledger_events WHERE attempt_id=${attemptId}),'-infinity'::timestamptz)))`;
+    await tx`UPDATE attempt_financial_state SET billing_status=${input.billingStatus},reservation_open_usd_micros=${nextOpen.toString()},realized_usd_micros=${nextRealized.toString()},pending_liability_usd_micros=${nextPending.toString()},version=version+1,updated_at=now() WHERE attempt_id=${attemptId}`;
+    await tx`UPDATE film_budget_accounts SET actual_spent_usd_micros=${spent.toString()},reserved_open_usd_micros=${reserved.toString()},pending_liability_usd_micros=${pending.toString()},version=version+1,updated_at=now() WHERE film_id=${current.film_id}`;
+    const response=financialDto({...current,billing_status:input.billingStatus,reservation_open_usd_micros:nextOpen.toString(),realized_usd_micros:nextRealized.toString(),pending_liability_usd_micros:nextPending.toString()});
+    await saveReceipt(tx,current.film_id,operatorId,key,'RECONCILE_ATTEMPT',requestHash,response);return response;
+  });
+}
+
+export async function readLedger(filmId:string,operatorId:string){return pgClient.begin('isolation level read committed read only',async tx=>{
+  await ownedAccount(tx,filmId,operatorId,false);const rows=await tx<{id:string;attempt_id:string;event_type:string;amount_usd_micros:string;billing_status:string;evidence:unknown;created_at:Date|string}[]>`SELECT id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at FROM cost_ledger_events WHERE film_id=${filmId} ORDER BY created_at,id`;
+  return rows.map(row=>({id:row.id,attemptId:row.attempt_id,eventType:row.event_type,amountUsdMicros:String(row.amount_usd_micros),billingStatus:row.billing_status,evidence:row.evidence,createdAt:new Date(row.created_at).toISOString()}));
+});}
+
+export async function readSummary(filmId:string,operatorId:string){return readBudget(filmId,operatorId);}
+

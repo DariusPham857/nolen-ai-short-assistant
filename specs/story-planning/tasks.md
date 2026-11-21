@@ -1,5 +1,5 @@
 # SP-001 tasks
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: G1_ACCEPTED
 Source: [Approved specification](spec.md)
 
 ## Tasks
@@ -14,10 +14,10 @@ Source: [Approved specification](spec.md)
 | SP-05 | REQUIRED: lifecycle/security/evidence; AT-SP-29/30 | PASS: authoritative approval evidence, edit race, Host/Origin/session/error envelope |
 | SP-06 | REQUIRED: storyboard UI | PASS: production browser canonical approval/history/mobile, draft/conflict recovery |
 | SP-07 | REQUIRED: fixture proposal provenance | PASS: FIXTURE provenance API + production UI acceptance |
-| SP-08 | REQUIRED: PG16/E2E/review and G1 handoff | PR #5 merged; ruleset-v2 patch local acceptance PASS; patch CI/owner sign-off PENDING |
+| SP-08 | REQUIRED: PG16/E2E/review and G1 handoff | PASS: PR #6 merged, merge CI passed, independent review completed and owner accepted G1 on 2026-11-21 |
 
 ## Handoff
-Baseline: main `fb44d24031f203f288b2c301df4362f599c54258` (PR #5 merged), patch branch `fix/story-continuity-ruleset-v2`.
+Baseline: main `d4e59c38838776982bf3c5a9fc8be4433eef34b2` (PR #6 merged).
 Registered files and per-task commands/results are recorded here as checks execute.
 Rollback: restore prior application only before SP data exists; after SP writes, preserve database/history and use a forward migration. Never remove applied migrations or reset user data.
 No finance/provider/queue/SSRF implementation. G2–G5 NOT_IMPLEMENTED.
@@ -35,7 +35,7 @@ Evidence: Windows, Node 22.23.0, pnpm 11.21.0, Docker PostgreSQL 16 test contain
 
 Source reconciliation: specs/spec.md → story-planning/spec.md (existing user text preserved and amended with owner-approved v1.1); PRD pilot 16:9 proposal → 9:16 (SP-D01). No new competing rule registry; other canonical rules unchanged.
 Failures fixed with evidence: waiver timestamp decoding (driver string rather than Date), JSONB receipt key-order comparison, explicit textarea label association. Browser setup respects the production login cooldown and reuses one UI-issued session; limiter unchanged.
-Next: publish and review the ruleset-v2 patch. G1 owner acceptance remains pending.
+Next: G1 is accepted. FI-001 Financial Integrity is the next separately gated slice; G2 remains unimplemented until its own verification and owner sign-off.
 
 ### SP-06–SP-07 registered files and evidence
 - [Storyboard](../../clients/components/storyboard.tsx) exports StoryboardWorkspace; Film route mounts it, Brief links to it and unlock redirect permits the protected Storyboard destination. Three-pane zinc/amber editor supports script/Bible/ShotSpec, continuity, keyframe override/transition reasons, accessible reorder, duplicate/remove/move and read-only history.
@@ -57,10 +57,10 @@ Use existing FC runbook/toolchain. `pnpm db:migrate` upgrades supported FC rows 
 - QG-CODE, QG-ARCH, QG-DOMAIN, QG-INTEGRATION and QG-EVIDENCE passed for the implemented G1 scope; exact current counts are recorded in the ruleset-v2 handoff.
 - NOT_IMPLEMENTED: paid LIVE planning, VIDEO_DISPATCH validation, financial admission/ledger, provider/jobs, media/export and G2–G5 release acceptance. No provider keys/calls required.
 - Read-only implementer review traced spec → contracts → API/auth → Film lock/receipts → snapshot/validation/approval → UI/retry and checked changed callers/tests. Findings fixed: waiver timestamp shape, canonical JSONB receipt comparison, textarea labeling, URL ID errors and actual stories/domain.ts import-restriction coverage. No remaining observed BLOCK or accepted CONTAIN exception; debt tracker unchanged.
-- The continuity follow-up review was accepted as patch scope, but post-implementation owner G1 sign-off has NOT been supplied. Local CI-equivalent PASS does not substitute for owner acceptance or remote patch CI.
-- Next dependency: review/accept SP-001, then plan the next approved generation/accounting slice; do not start deferred spikes automatically.
+- Independent acceptance reviewed the merged ruleset-v2 implementation and found no remaining BLOCK. The project owner accepted G1 on 2026-11-21; this documentation change records that decision and does not claim G2–G5 acceptance.
+- Next dependency: implement and independently verify the approved FI-001 Financial Integrity slice; do not start G3/provider work automatically.
 
-Acceptance mapping (implemented evidence, independent acceptance still pending):
+Acceptance mapping (implemented evidence accepted for G1 on 2026-11-21):
 - AT-SP-01–08: snapshot/history, duplicate/remove/reorder, concurrency, ownership and invalid inputs → Story PG16 + browser suites.
 - AT-SP-09–15: recurring identity-style lock, wardrobe/held-prop, location/light/pose, explicit transitions, bounded waivers and policy/override behavior → domain tests + Story PG16. An OPTIONAL override cannot bypass IDENTITY_LOCK.
 - AT-SP-16–19: lifecycle/races, edit-after-approval history and REQUIRED keyframe without asset → PG16 + canonical browser approval.
@@ -82,4 +82,4 @@ Execution notes: initial sandbox network/artifact permissions required approved 
 - **Review:** separate read-only diff/caller/test pass found and fixed the Storyboard location-editor conflict, stale v1 spec declaration and inaccurate save error text. No remaining observed BLOCK, CONTAIN exception or new technical debt. Test-only Compose project/volume and PostgreSQL container were removed; unrelated Docker resources and the original dirty checkout were untouched.
 
 ### Remote CI and publication handoff
-SP-001 base PR #5 is merged at `fb44d24031f203f288b2c301df4362f599c54258`; its post-merge CI succeeded. Ruleset-v2 runtime commit `358197647dde45e237d7c74c89a97281e741b666` is verified by [GitHub Actions run 44862138747](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44862138747): overall SUCCESS, jobs `film` and `compose` SUCCESS. The patch branch is `fix/story-continuity-ruleset-v2`; PR review and owner G1 acceptance remain PENDING, so SP-001 is not marked DONE. Paid planning, VIDEO_DISPATCH and G2–G5 remain deferred.
+SP-001 base PR #5 and ruleset-v2 PR #6 are merged. The PR #6 merge commit is `d4e59c38838776982bf3c5a9fc8be4433eef34b2`; [post-merge GitHub Actions run 44863331338](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44863331338) completed successfully. Independent acceptance found no BLOCK and the project owner accepted G1 on 2026-11-21. Paid planning, VIDEO_DISPATCH and G2–G5 remain deferred.

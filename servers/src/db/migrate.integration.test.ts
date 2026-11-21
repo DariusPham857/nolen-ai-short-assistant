@@ -22,9 +22,15 @@ it('migrates fresh database and accepts a complete valid journal repeatedly', as
   await withDatabase(async (url, client) => {
     await migrateDatabase(url);
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(2);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);
     expect(await client`SELECT * FROM films`).toHaveLength(0);
   });
+});
+
+it('FI append-only trigger/function drift blocks migration before repair',async()=>{
+  for(const mutation of ['ALTER TABLE cost_ledger_events DISABLE TRIGGER fi_cost_ledger_events_append_only','DROP TRIGGER fi_budget_limit_events_append_only ON budget_limit_events',"CREATE OR REPLACE FUNCTION fi_guard_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"]){
+    await withDatabase(async(url,client)=>{await migrateDatabase(url);await client.unsafe(mutation);await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);});
+  }
 });
 
 it('SP guard trigger/function drift blocks migration before any repair',async()=>{
@@ -32,7 +38,7 @@ it('SP guard trigger/function drift blocks migration before any repair',async()=
     await withDatabase(async(url,client)=>{
       await migrateDatabase(url);await client.unsafe(mutation);
       await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');
-      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(2);
+      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);
     });
   }
 });
@@ -51,6 +57,8 @@ it('upgrades an FC-only database without changing the original Film DTO or times
     const [after]=await client`SELECT * FROM films WHERE id=${id}`;
     expect(after.created_at).toEqual(before.created_at);expect(after.updated_at).toEqual(before.updated_at);
     expect(after.create_receipt).toMatchObject({id,title:'Legacy',status:'DRAFT',activeStoryRevisionId:null});
+    expect((await client`SELECT * FROM film_budget_accounts WHERE film_id=${id}`)[0]).toMatchObject({film_id:id,budget_limit_usd_micros:'0'});
+    expect(await client`SELECT * FROM budget_limit_events WHERE film_id=${id}`).toHaveLength(1);
     await migrateDatabase(url);
   });
   await withDatabase(async(url,client)=>{

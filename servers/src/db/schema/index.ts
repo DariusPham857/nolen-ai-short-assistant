@@ -11,12 +11,13 @@
 export * from "./films.js";
 export * from "./sessions.js";
 export * from './stories.js';
+export * from './financial.js';
 // Future schema exports (EP-01, EP-02):
 // export * from "./story-revisions.js";
 // export * from "./scenes.js";
 // export * from "./shots.js";
 // export * from "./shot-revisions.js";
-// export * from "./attempts.js";
+// Attempt and ledger tables are implemented in financial.ts for FI-001.
 // export * from "./assets.js";
 // export * from "./asset-reviews.js";
 // export * from "./cost-ledger.js";
