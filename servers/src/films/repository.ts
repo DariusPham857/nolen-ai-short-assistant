@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { normalizeFilm, filmDtoSchema, type CreateFilm, type FilmDto } from '@nolen/contracts';
 import { db } from '../db/index.js';
 import { films, type Film } from '../db/schema/films.js';
+import { budgetLimitEvents, filmBudgetAccounts } from '../db/schema/financial.js';
 
 /** Convert persisted bigint into the explicit browser-safe DTO; internal fields stay private. */
 export function filmDto(row: Film): FilmDto {
@@ -30,6 +31,9 @@ export async function createFilm(input: CreateFilm, key: string, operatorId: str
       budgetLimitUsdMicros: BigInt(input.budgetLimitUsdMicros), operatorId, idempotencyKey: key, requestHash: hash,
     }).onConflictDoNothing({ target: [films.operatorId, films.idempotencyKey] }).returning();
     if (inserted) {
+      await tx.insert(filmBudgetAccounts).values({filmId:inserted.id,operatorId,budgetLimitUsdMicros:inserted.budgetLimitUsdMicros});
+      await tx.insert(budgetLimitEvents).values({id:randomUUID(),filmId:inserted.id,actorId:operatorId,
+        priorLimitUsdMicros:inserted.budgetLimitUsdMicros,newLimitUsdMicros:inserted.budgetLimitUsdMicros,reason:'Film creation baseline'});
       const receipt=filmDto(inserted);
       await tx.update(films).set({createReceipt:receipt}).where(eq(films.id,inserted.id));
       return receipt;

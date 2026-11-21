@@ -24,9 +24,9 @@ export async function inspectSchema(client: postgres.Sql, state = 1) {
   if (state < 2) return base;
   const triggers = await client`SELECT c.relname,t.tgname,t.tgenabled,pg_get_triggerdef(t.oid) AS definition
     FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgname LIKE 'sp_%' ORDER BY c.relname,t.tgname`;
+    WHERE n.nspname='public' AND NOT t.tgisinternal AND (t.tgname LIKE 'sp_%' OR t.tgname LIKE 'fi_%') ORDER BY c.relname,t.tgname`;
   const functions = await client`SELECT p.proname,pg_get_functiondef(p.oid) AS definition FROM pg_proc p
-    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('sp_guard_immutable','sp_guard_revision','sp_guard_waiver') ORDER BY p.proname`;
+    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('sp_guard_immutable','sp_guard_revision','sp_guard_waiver','fi_guard_append_only') ORDER BY p.proname`;
   return {...base,triggers:[...triggers],functions:[...functions]};
 }
 
