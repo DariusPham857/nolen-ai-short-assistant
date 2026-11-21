@@ -20,6 +20,9 @@ describe('checked financial arithmetic', () => {
 
   it('computes exact signed headroom, 80% warning and admission', () => {
     expect(projection({budgetLimitUsdMicros:100n,actualSpentUsdMicros:60n,reservedOpenUsdMicros:20n,pendingLiabilityUsdMicros:0n})).toMatchObject({availableUsdMicros:20n,headroomUsdMicros:20n,warning:true});
+    expect(projection({budgetLimitUsdMicros:100n,actualSpentUsdMicros:20n,reservedOpenUsdMicros:40n,pendingLiabilityUsdMicros:10n})).toMatchObject({availableUsdMicros:40n,headroomUsdMicros:40n,warning:false});
+    expect(projection({budgetLimitUsdMicros:100n,actualSpentUsdMicros:110n,reservedOpenUsdMicros:0n,pendingLiabilityUsdMicros:0n})).toMatchObject({availableUsdMicros:0n,headroomUsdMicros:-10n,warning:true});
+    expect(() => projection({budgetLimitUsdMicros:100n,actualSpentUsdMicros:0n,reservedOpenUsdMicros:5n,pendingLiabilityUsdMicros:6n})).toThrow('Pending liability');
     expect(() => assertAdmission({budgetLimitUsdMicros:100n,actualSpentUsdMicros:60n,reservedOpenUsdMicros:20n,pendingLiabilityUsdMicros:0n},21n)).toThrow('insufficient');
     expect(() => projection({budgetLimitUsdMicros:0n,actualSpentUsdMicros:-1n,reservedOpenUsdMicros:0n,pendingLiabilityUsdMicros:0n})).toThrow('cannot be negative');
   });

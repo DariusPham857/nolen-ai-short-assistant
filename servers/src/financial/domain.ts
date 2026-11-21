@@ -76,10 +76,11 @@ export function projection(value: Projection) {
   const spent = nonnegative(value.actualSpentUsdMicros, 'actual spend');
   const reserved = nonnegative(value.reservedOpenUsdMicros, 'open reservation');
   const pending = nonnegative(value.pendingLiabilityUsdMicros, 'pending liability');
+  if (pending > reserved) throw new ApiFailure(409, 'PENDING_EXCEEDS_RESERVATION', 'Pending liability cannot exceed open reservation');
   const committed = add(spent, reserved);
   const headroom = subtract(budget, committed);
-  const available = subtract(headroom, pending);
-  const warning = budget > 0n && add(spent, reserved, pending) * BPS >= budget * WARNING_BPS;
+  const available = headroom > 0n ? headroom : 0n;
+  const warning = budget > 0n && committed * BPS >= budget * WARNING_BPS;
   return { budgetLimitUsdMicros: budget, actualSpentUsdMicros: spent, reservedOpenUsdMicros: reserved,
     pendingLiabilityUsdMicros: pending, availableUsdMicros: available, headroomUsdMicros: headroom,
     warningThresholdBps: Number(WARNING_BPS), warning };

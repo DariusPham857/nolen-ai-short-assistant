@@ -1,0 +1,1923 @@
+{
+  "id": "f7501a3c-0d2e-4315-a801-12021ac2a445",
+  "prevId": "1e3e8309-6a55-40a4-9460-adf85908950a",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.films": {
+      "name": "films",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "brief": {
+          "name": "brief",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "film_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DRAFT'"
+        },
+        "budget_limit_usd_micros": {
+          "name": "budget_limit_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "duration_target_seconds": {
+          "name": "duration_target_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 30
+        },
+        "aspect_ratio": {
+          "name": "aspect_ratio",
+          "type": "aspect_ratio",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'9:16'"
+        },
+        "style_notes": {
+          "name": "style_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active_story_revision_id": {
+          "name": "active_story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "create_receipt": {
+          "name": "create_receipt",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "films_operator_idempotency": {
+          "name": "films_operator_idempotency",
+          "columns": [
+            {
+              "expression": "operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "films_budget_nonnegative": {
+          "name": "films_budget_nonnegative",
+          "value": "\"films\".\"budget_limit_usd_micros\" >= 0"
+        },
+        "films_duration_bounds": {
+          "name": "films_duration_bounds",
+          "value": "\"films\".\"duration_target_seconds\" BETWEEN 30 AND 60"
+        },
+        "films_title_required": {
+          "name": "films_title_required",
+          "value": "length(trim(\"films\".\"title\")) > 0"
+        },
+        "films_brief_bounds": {
+          "name": "films_brief_bounds",
+          "value": "length(trim(\"films\".\"brief\")) BETWEEN 1 AND 10000"
+        },
+        "films_style_bounds": {
+          "name": "films_style_bounds",
+          "value": "\"films\".\"style_notes\" IS NULL OR length(\"films\".\"style_notes\") <= 2000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.operator_sessions": {
+      "name": "operator_sessions",
+      "schema": "",
+      "columns": {
+        "session_hash": {
+          "name": "session_hash",
+          "type": "varchar(64)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_fingerprint": {
+          "name": "token_fingerprint",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.story_approvals": {
+      "name": "story_approvals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "story_revision_id": {
+          "name": "story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_approvals_story_revision_id_story_revisions_id_fk": {
+          "name": "story_approvals_story_revision_id_story_revisions_id_fk",
+          "tableFrom": "story_approvals",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "story_revision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_approvals_story_revision_id_unique": {
+          "name": "story_approvals_story_revision_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "story_revision_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.story_mutation_receipts": {
+      "name": "story_mutation_receipts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_mutation_receipts_film_id_films_id_fk": {
+          "name": "story_mutation_receipts_film_id_films_id_fk",
+          "tableFrom": "story_mutation_receipts",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_mutation_receipts_film_id_operator_id_key_unique": {
+          "name": "story_mutation_receipts_film_id_operator_id_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "operator_id",
+            "key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.scenes": {
+      "name": "scenes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "scenes_film_id_films_id_fk": {
+          "name": "scenes_film_id_films_id_fk",
+          "tableFrom": "scenes",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "scenes_film_id_id_unique": {
+          "name": "scenes_film_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.shot_revisions": {
+      "name": "shot_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shot_id": {
+          "name": "shot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spec": {
+          "name": "spec",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dependency_hash": {
+          "name": "dependency_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "policy": {
+          "name": "policy",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "shot_revisions_film_id_shot_id_shots_film_id_id_fk": {
+          "name": "shot_revisions_film_id_shot_id_shots_film_id_id_fk",
+          "tableFrom": "shot_revisions",
+          "tableTo": "shots",
+          "columnsFrom": [
+            "film_id",
+            "shot_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "shot_revisions_film_id_id_unique": {
+          "name": "shot_revisions_film_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "id"
+          ]
+        },
+        "shot_revisions_film_id_shot_id_id_unique": {
+          "name": "shot_revisions_film_id_shot_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "shot_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.shots": {
+      "name": "shots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "shots_film_id_films_id_fk": {
+          "name": "shots_film_id_films_id_fk",
+          "tableFrom": "shots",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "shots_film_id_id_unique": {
+          "name": "shots_film_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.story_revision_scenes": {
+      "name": "story_revision_scenes",
+      "schema": "",
+      "columns": {
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "story_revision_id": {
+          "name": "story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scene_id": {
+          "name": "scene_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_revision_scenes_film_id_story_revision_id_story_revisions_film_id_id_fk": {
+          "name": "story_revision_scenes_film_id_story_revision_id_story_revisions_film_id_id_fk",
+          "tableFrom": "story_revision_scenes",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "film_id",
+            "story_revision_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "story_revision_scenes_film_id_scene_id_scenes_film_id_id_fk": {
+          "name": "story_revision_scenes_film_id_scene_id_scenes_film_id_id_fk",
+          "tableFrom": "story_revision_scenes",
+          "tableTo": "scenes",
+          "columnsFrom": [
+            "film_id",
+            "scene_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_revision_scenes_film_id_story_revision_id_scene_id_unique": {
+          "name": "story_revision_scenes_film_id_story_revision_id_scene_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "story_revision_id",
+            "scene_id"
+          ]
+        },
+        "story_revision_scenes_story_revision_id_position_unique": {
+          "name": "story_revision_scenes_story_revision_id_position_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "story_revision_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.story_revision_shots": {
+      "name": "story_revision_shots",
+      "schema": "",
+      "columns": {
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "story_revision_id": {
+          "name": "story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scene_id": {
+          "name": "scene_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shot_id": {
+          "name": "shot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shot_revision_id": {
+          "name": "shot_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_revision_shots_film_id_story_revision_id_scene_id_story_revision_scenes_film_id_story_revision_id_scene_id_fk": {
+          "name": "story_revision_shots_film_id_story_revision_id_scene_id_story_revision_scenes_film_id_story_revision_id_scene_id_fk",
+          "tableFrom": "story_revision_shots",
+          "tableTo": "story_revision_scenes",
+          "columnsFrom": [
+            "film_id",
+            "story_revision_id",
+            "scene_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "story_revision_id",
+            "scene_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "story_revision_shots_film_id_shot_id_shot_revision_id_shot_revisions_film_id_shot_id_id_fk": {
+          "name": "story_revision_shots_film_id_shot_id_shot_revision_id_shot_revisions_film_id_shot_id_id_fk",
+          "tableFrom": "story_revision_shots",
+          "tableTo": "shot_revisions",
+          "columnsFrom": [
+            "film_id",
+            "shot_id",
+            "shot_revision_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "shot_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_revision_shots_story_revision_id_shot_id_unique": {
+          "name": "story_revision_shots_story_revision_id_shot_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "story_revision_id",
+            "shot_id"
+          ]
+        },
+        "story_revision_shots_story_revision_id_scene_id_position_unique": {
+          "name": "story_revision_shots_story_revision_id_scene_id_position_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "story_revision_id",
+            "scene_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.story_revisions": {
+      "name": "story_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision_no": {
+          "name": "revision_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DRAFT'"
+        },
+        "state_version": {
+          "name": "state_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "content": {
+          "name": "content",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_revisions_film_id_films_id_fk": {
+          "name": "story_revisions_film_id_films_id_fk",
+          "tableFrom": "story_revisions",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "story_revisions_film_id_parent_id_story_revisions_film_id_id_fk": {
+          "name": "story_revisions_film_id_parent_id_story_revisions_film_id_id_fk",
+          "tableFrom": "story_revisions",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "film_id",
+            "parent_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_revisions_film_id_id_unique": {
+          "name": "story_revisions_film_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "id"
+          ]
+        },
+        "story_revisions_film_id_revision_no_unique": {
+          "name": "story_revisions_film_id_revision_no_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "revision_no"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "story_state_valid": {
+          "name": "story_state_valid",
+          "value": "\"story_revisions\".\"state\" IN ('DRAFT','PLANNED','IN_REVIEW','APPROVED') AND \"story_revisions\".\"state_version\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.story_validations": {
+      "name": "story_validations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "story_revision_id": {
+          "name": "story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "context": {
+          "name": "context",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dependency_hash": {
+          "name": "dependency_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rule_set_version": {
+          "name": "rule_set_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "findings": {
+          "name": "findings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_validations_story_revision_id_story_revisions_id_fk": {
+          "name": "story_validations_story_revision_id_story_revisions_id_fk",
+          "tableFrom": "story_validations",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "story_revision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_validations_story_revision_id_context_dependency_hash_rule_set_version_unique": {
+          "name": "story_validations_story_revision_id_context_dependency_hash_rule_set_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "story_revision_id",
+            "context",
+            "dependency_hash",
+            "rule_set_version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.story_waivers": {
+      "name": "story_waivers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "story_revision_id": {
+          "name": "story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finding_fingerprint": {
+          "name": "finding_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dependency_hash": {
+          "name": "dependency_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "story_waivers_story_revision_id_story_revisions_id_fk": {
+          "name": "story_waivers_story_revision_id_story_revisions_id_fk",
+          "tableFrom": "story_waivers",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "story_revision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "story_waivers_story_revision_id_finding_fingerprint_unique": {
+          "name": "story_waivers_story_revision_id_finding_fingerprint_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "story_revision_id",
+            "finding_fingerprint"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.attempt_financial_state": {
+      "name": "attempt_financial_state",
+      "schema": "",
+      "columns": {
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "billing_status": {
+          "name": "billing_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "reservation_open_usd_micros": {
+          "name": "reservation_open_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "realized_usd_micros": {
+          "name": "realized_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "pending_liability_usd_micros": {
+          "name": "pending_liability_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "attempt_financial_state_attempt_id_attempts_id_fk": {
+          "name": "attempt_financial_state_attempt_id_attempts_id_fk",
+          "tableFrom": "attempt_financial_state",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "attempt_billing_status_valid": {
+          "name": "attempt_billing_status_valid",
+          "value": "\"attempt_financial_state\".\"billing_status\" IN ('PENDING','PARTIAL','FINAL','DISPUTED')"
+        },
+        "attempt_financial_nonnegative": {
+          "name": "attempt_financial_nonnegative",
+          "value": "\"attempt_financial_state\".\"reservation_open_usd_micros\" >= 0 AND \"attempt_financial_state\".\"realized_usd_micros\" >= 0 AND \"attempt_financial_state\".\"pending_liability_usd_micros\" >= 0 AND \"attempt_financial_state\".\"version\" >= 0"
+        },
+        "attempt_financial_pending_within_reserved": {
+          "name": "attempt_financial_pending_within_reserved",
+          "value": "\"attempt_financial_state\".\"pending_liability_usd_micros\" <= \"attempt_financial_state\".\"reservation_open_usd_micros\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.attempts": {
+      "name": "attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "story_revision_id": {
+          "name": "story_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shot_revision_id": {
+          "name": "shot_revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate_card_snapshot_id": {
+          "name": "rate_card_snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pricing_units": {
+          "name": "pricing_units",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reservation_usd_micros": {
+          "name": "reservation_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'QUEUED'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "attempts_film_id_films_id_fk": {
+          "name": "attempts_film_id_films_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attempts_story_revision_id_story_revisions_id_fk": {
+          "name": "attempts_story_revision_id_story_revisions_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "story_revision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attempts_shot_revision_id_shot_revisions_id_fk": {
+          "name": "attempts_shot_revision_id_shot_revisions_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "shot_revisions",
+          "columnsFrom": [
+            "shot_revision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attempts_rate_card_snapshot_id_rate_card_snapshots_id_fk": {
+          "name": "attempts_rate_card_snapshot_id_rate_card_snapshots_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "rate_card_snapshots",
+          "columnsFrom": [
+            "rate_card_snapshot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attempts_film_id_story_revision_id_story_revisions_film_id_id_fk": {
+          "name": "attempts_film_id_story_revision_id_story_revisions_film_id_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "story_revisions",
+          "columnsFrom": [
+            "film_id",
+            "story_revision_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "attempts_film_id_shot_revision_id_shot_revisions_film_id_id_fk": {
+          "name": "attempts_film_id_shot_revision_id_shot_revisions_film_id_id_fk",
+          "tableFrom": "attempts",
+          "tableTo": "shot_revisions",
+          "columnsFrom": [
+            "film_id",
+            "shot_revision_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "attempt_kind_valid": {
+          "name": "attempt_kind_valid",
+          "value": "\"attempts\".\"kind\" IN ('IMAGE','VIDEO','TTS','ASSEMBLY')"
+        },
+        "attempt_state_valid": {
+          "name": "attempt_state_valid",
+          "value": "\"attempts\".\"state\" IN ('QUEUED','SUBMITTED','SUBMISSION_UNCERTAIN','RUNNING','SUCCEEDED','FAILED','CANCELED')"
+        },
+        "attempt_values_valid": {
+          "name": "attempt_values_valid",
+          "value": "\"attempts\".\"pricing_units\" > 0 AND \"attempts\".\"reservation_usd_micros\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.budget_limit_events": {
+      "name": "budget_limit_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prior_limit_usd_micros": {
+          "name": "prior_limit_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "new_limit_usd_micros": {
+          "name": "new_limit_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "budget_limit_events_film_id_films_id_fk": {
+          "name": "budget_limit_events_film_id_films_id_fk",
+          "tableFrom": "budget_limit_events",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "budget_limit_event_values_nonnegative": {
+          "name": "budget_limit_event_values_nonnegative",
+          "value": "\"budget_limit_events\".\"prior_limit_usd_micros\" >= 0 AND \"budget_limit_events\".\"new_limit_usd_micros\" >= 0"
+        },
+        "budget_limit_event_reason_required": {
+          "name": "budget_limit_event_reason_required",
+          "value": "length(trim(\"budget_limit_events\".\"reason\")) BETWEEN 1 AND 1000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cost_ledger_events": {
+      "name": "cost_ledger_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_usd_micros": {
+          "name": "amount_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "billing_status": {
+          "name": "billing_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cost_ledger_events_film_id_films_id_fk": {
+          "name": "cost_ledger_events_film_id_films_id_fk",
+          "tableFrom": "cost_ledger_events",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cost_ledger_events_attempt_id_attempts_id_fk": {
+          "name": "cost_ledger_events_attempt_id_attempts_id_fk",
+          "tableFrom": "cost_ledger_events",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ledger_event_type_valid": {
+          "name": "ledger_event_type_valid",
+          "value": "\"cost_ledger_events\".\"event_type\" IN ('RESERVATION_CREATED','CHARGE_POSTED','RESERVATION_RELEASED','CHARGE_CORRECTED','RESERVATION_ADJUSTED')"
+        },
+        "ledger_billing_status_valid": {
+          "name": "ledger_billing_status_valid",
+          "value": "\"cost_ledger_events\".\"billing_status\" IN ('PENDING','PARTIAL','FINAL','DISPUTED')"
+        },
+        "ledger_nonzero_correction": {
+          "name": "ledger_nonzero_correction",
+          "value": "\"cost_ledger_events\".\"event_type\" IN ('CHARGE_CORRECTED','RESERVATION_ADJUSTED') OR \"cost_ledger_events\".\"amount_usd_micros\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dispatch_outbox": {
+      "name": "dispatch_outbox",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "queue_name": {
+          "name": "queue_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "enqueue_outcome": {
+          "name": "enqueue_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NOT_ATTEMPTED'"
+        },
+        "boss_job_id": {
+          "name": "boss_job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "retry_count": {
+          "name": "retry_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dispatch_outbox_attempt_id_attempts_id_fk": {
+          "name": "dispatch_outbox_attempt_id_attempts_id_fk",
+          "tableFrom": "dispatch_outbox",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dispatch_outbox_attempt_id_unique": {
+          "name": "dispatch_outbox_attempt_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "attempt_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "dispatch_outbox_status_valid": {
+          "name": "dispatch_outbox_status_valid",
+          "value": "\"dispatch_outbox\".\"status\" IN ('PENDING','DELIVERING','DELIVERED')"
+        },
+        "dispatch_outcome_valid": {
+          "name": "dispatch_outcome_valid",
+          "value": "\"dispatch_outbox\".\"enqueue_outcome\" IN ('NOT_ATTEMPTED','JOB_ID','NULL_UNVERIFIED','UNKNOWN_ENQUEUE_OUTCOME','WORKER_CONFIRMED')"
+        },
+        "dispatch_retry_nonnegative": {
+          "name": "dispatch_retry_nonnegative",
+          "value": "\"dispatch_outbox\".\"retry_count\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.film_budget_accounts": {
+      "name": "film_budget_accounts",
+      "schema": "",
+      "columns": {
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "budget_limit_usd_micros": {
+          "name": "budget_limit_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actual_spent_usd_micros": {
+          "name": "actual_spent_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "reserved_open_usd_micros": {
+          "name": "reserved_open_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "pending_liability_usd_micros": {
+          "name": "pending_liability_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "film_budget_accounts_film_id_films_id_fk": {
+          "name": "film_budget_accounts_film_id_films_id_fk",
+          "tableFrom": "film_budget_accounts",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "film_budget_projection_nonnegative": {
+          "name": "film_budget_projection_nonnegative",
+          "value": "\"film_budget_accounts\".\"budget_limit_usd_micros\" >= 0 AND \"film_budget_accounts\".\"actual_spent_usd_micros\" >= 0 AND \"film_budget_accounts\".\"reserved_open_usd_micros\" >= 0 AND \"film_budget_accounts\".\"pending_liability_usd_micros\" >= 0 AND \"film_budget_accounts\".\"version\" >= 0"
+        },
+        "film_budget_pending_within_reserved": {
+          "name": "film_budget_pending_within_reserved",
+          "value": "\"film_budget_accounts\".\"pending_liability_usd_micros\" <= \"film_budget_accounts\".\"reserved_open_usd_micros\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.financial_command_receipts": {
+      "name": "financial_command_receipts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "film_id": {
+          "name": "film_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "command": {
+          "name": "command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "financial_command_receipts_film_id_films_id_fk": {
+          "name": "financial_command_receipts_film_id_films_id_fk",
+          "tableFrom": "financial_command_receipts",
+          "tableTo": "films",
+          "columnsFrom": [
+            "film_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "financial_receipt_key": {
+          "name": "financial_receipt_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "operator_id",
+            "key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.outbound_dispatches": {
+      "name": "outbound_dispatches",
+      "schema": "",
+      "columns": {
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NOT_STARTED'"
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_job_id": {
+          "name": "provider_job_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_request_fingerprint": {
+          "name": "provider_request_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_dispatches_attempt_id_attempts_id_fk": {
+          "name": "outbound_dispatches_attempt_id_attempts_id_fk",
+          "tableFrom": "outbound_dispatches",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "outbound_dispatch_state_valid": {
+          "name": "outbound_dispatch_state_valid",
+          "value": "\"outbound_dispatches\".\"state\" IN ('NOT_STARTED','SUBMITTING','SUBMITTED','SUBMISSION_UNCERTAIN')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.rate_card_snapshots": {
+      "name": "rate_card_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation": {
+          "name": "operation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate_type": {
+          "name": "rate_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit_price_usd_micros": {
+          "name": "unit_price_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_maximum_usd_micros": {
+          "name": "provider_maximum_usd_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "effective_at": {
+          "name": "effective_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_ref": {
+          "name": "source_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "rate_card_type_valid": {
+          "name": "rate_card_type_valid",
+          "value": "\"rate_card_snapshots\".\"rate_type\" IN ('FIXED_PER_REQUEST','PER_SECOND')"
+        },
+        "rate_card_values_valid": {
+          "name": "rate_card_values_valid",
+          "value": "\"rate_card_snapshots\".\"unit_price_usd_micros\" >= 0 AND (\"rate_card_snapshots\".\"provider_maximum_usd_micros\" IS NULL OR \"rate_card_snapshots\".\"provider_maximum_usd_micros\" >= 0) AND \"rate_card_snapshots\".\"expires_at\" > \"rate_card_snapshots\".\"effective_at\""
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.aspect_ratio": {
+      "name": "aspect_ratio",
+      "schema": "public",
+      "values": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ]
+    },
+    "public.film_status": {
+      "name": "film_status",
+      "schema": "public",
+      "values": [
+        "DRAFT",
+        "PLANNING",
+        "IN_PRODUCTION",
+        "COMPLETED",
+        "ARCHIVED"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

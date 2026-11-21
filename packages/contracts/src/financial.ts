@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const maxMicros = 9223372036854775807n;
 const microsSchema = z.string().regex(/^(0|[1-9]\d*)$/).refine(value => BigInt(value) <= maxMicros, 'Money exceeds BIGINT range');
+const versionSchema = z.number().int().nonnegative();
 
 export const signedMicrosSchema = z.string().regex(/^-?(0|[1-9]\d*)$/).refine(value => {
   const amount = BigInt(value);
@@ -25,6 +26,7 @@ export const createAttemptSchema = estimateAttemptSchema.extend({
 export const updateBudgetSchema = z.object({
   budgetLimitUsdMicros: microsSchema,
   reason: z.string().trim().min(1).max(1000),
+  expectedVersion: versionSchema,
 }).strict();
 
 export const reconcileAttemptSchema = z.object({
@@ -32,6 +34,7 @@ export const reconcileAttemptSchema = z.object({
   realizedChargeUsdMicros: microsSchema,
   pendingLiabilityUsdMicros: microsSchema,
   evidenceRef: z.string().trim().min(1).max(2000),
+  expectedVersion: versionSchema,
 }).strict();
 
 export const moneyProjectionSchema = z.object({
@@ -39,8 +42,9 @@ export const moneyProjectionSchema = z.object({
   actualSpentUsdMicros: microsSchema,
   reservedOpenUsdMicros: microsSchema,
   pendingLiabilityUsdMicros: microsSchema,
-  availableUsdMicros: signedMicrosSchema,
+  availableUsdMicros: microsSchema,
   headroomUsdMicros: signedMicrosSchema,
+  version: versionSchema,
   warningThresholdBps: z.literal(8000),
   warning: z.boolean(),
 });
@@ -73,6 +77,7 @@ export const attemptFinancialDtoSchema = z.object({
   rateCardSnapshotId: z.string().uuid(),
   outboxStatus: z.enum(['PENDING', 'DELIVERING', 'DELIVERED']),
   enqueueOutcome: z.enum(['NOT_ATTEMPTED', 'JOB_ID', 'NULL_UNVERIFIED', 'UNKNOWN_ENQUEUE_OUTCOME', 'WORKER_CONFIRMED']),
+  version: versionSchema,
 });
 
 export const ledgerEventDtoSchema = z.object({

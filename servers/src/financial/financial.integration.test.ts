@@ -7,20 +7,25 @@ import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { createFinancialApi } from '../http/financial-api.js';
 import { claimProviderSubmission, relayOne } from './outbox.js';
+import { auditFinancialProjection } from './repository.js';
 
 const token='financial-test-operator-token-at-least-32-bytes';
 const api=createFinancialApi();let cookie='';
 function request(route:string,method='GET',body?:unknown,key=randomUUID(),headers:Record<string,string>={}){
   return api.request(`http://127.0.0.1:3000${route}`,{method,headers:{Origin:'http://127.0.0.1:3000',Cookie:cookie,'Content-Type':'application/json','Idempotency-Key':key,...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
 }
-async function fixture(budget='100',rate='25',rateType:'FIXED_PER_REQUEST'|'PER_SECOND'='FIXED_PER_REQUEST',approved=true){
-  const filmId=randomUUID(),storyRevisionId=randomUUID(),rateCardSnapshotId=randomUUID();
+async function fixture(budget='100',rate='25',rateType:'FIXED_PER_REQUEST'|'PER_SECOND'='FIXED_PER_REQUEST',approved=true,ruleSetVersion='story-approval-2',approvalDependency='fixture-dependency'){
+  const filmId=randomUUID(),storyRevisionId=randomUUID(),rateCardSnapshotId=randomUUID(),validationRunId=randomUUID();
   await pgClient.begin(async tx=>{
     await tx`INSERT INTO films(id,title,brief,budget_limit_usd_micros,operator_id,idempotency_key,request_hash) VALUES(${filmId},'FI test','Financial fixture',${budget},'local-operator',${randomUUID()},'fixture')`;
     await tx`INSERT INTO film_budget_accounts(film_id,operator_id,budget_limit_usd_micros) VALUES(${filmId},'local-operator',${budget})`;
     await tx`INSERT INTO budget_limit_events(id,film_id,actor_id,prior_limit_usd_micros,new_limit_usd_micros,reason) VALUES(${randomUUID()},${filmId},'local-operator',${budget},${budget},'test baseline')`;
     await tx`INSERT INTO story_revisions(id,film_id,revision_no,state,content,content_hash) VALUES(${storyRevisionId},${filmId},1,${approved?'APPROVED':'IN_REVIEW'},'{}'::jsonb,'fixture')`;
     await tx`UPDATE films SET active_story_revision_id=${storyRevisionId},status='PLANNING' WHERE id=${filmId}`;
+    if(approved){
+      await tx`INSERT INTO story_validations(id,story_revision_id,context,dependency_hash,rule_set_version,findings) VALUES(${validationRunId},${storyRevisionId},'STORY_APPROVAL','fixture-dependency',${ruleSetVersion},'[]'::jsonb)`;
+      await tx`INSERT INTO story_approvals(id,story_revision_id,evidence) VALUES(${randomUUID()},${storyRevisionId},${JSON.stringify({storyRevisionId,contentHash:'fixture',dependencyHash:approvalDependency,ruleSetVersion,validationRunId,waiverIds:[],waiverSetHash:'fixture-waivers',actorId:'local-operator',approvedAt:new Date().toISOString(),decision:'APPROVED'})}::jsonb)`;
+    }
     await tx`INSERT INTO rate_card_snapshots(id,provider,model,operation,rate_type,unit_price_usd_micros,effective_at,expires_at,source_ref)
       VALUES(${rateCardSnapshotId},'test-provider','test-model','TTS',${rateType},${rate},'2026-01-01','2027-01-01','test-only deterministic fixture')`;
   });
@@ -42,7 +47,7 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     expect((await pgClient`SELECT * FROM cost_ledger_events WHERE film_id=${f.filmId}`)).toHaveLength(1);
     expect((await pgClient`SELECT o.* FROM dispatch_outbox o JOIN attempts a ON a.id=o.attempt_id WHERE a.film_id=${f.filmId}`)).toHaveLength(1);
     const budget=moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/budget`)).json());
-    expect(budget.reservedOpenUsdMicros).toBe('25');
+    expect(budget).toMatchObject({reservedOpenUsdMicros:'25',version:1});
     expect((await request(`/api/films/${f.filmId}/attempts`,'POST',{...command(f),pricingUnits:2},key)).status).toBe(409);
   });
 
@@ -63,31 +68,69 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     const unapproved=await fixture('100','10','FIXED_PER_REQUEST',false);
     expect((await request(`/api/films/${unapproved.filmId}/attempts`,'POST',command(unapproved))).status).toBe(409);
     expect((await pgClient`SELECT * FROM attempts WHERE film_id=${unapproved.filmId}`)).toHaveLength(0);
+    const historical=await fixture('100','10','FIXED_PER_REQUEST',true,'story-approval-1');
+    expect((await request(`/api/films/${historical.filmId}/attempts`,'POST',command(historical))).status).toBe(409);
+    const staleEvidence=await fixture('100','10','FIXED_PER_REQUEST',true,'story-approval-2','stale-dependency');
+    expect((await request(`/api/films/${staleEvidence.filmId}/attempts`,'POST',command(staleEvidence))).status).toBe(409);
+    const superseded=await fixture('100','10');const successor=randomUUID();
+    await pgClient.begin(async tx=>{await tx`INSERT INTO story_revisions(id,film_id,parent_id,revision_no,state,content,content_hash) VALUES(${successor},${superseded.filmId},${superseded.storyRevisionId},2,'DRAFT','{}'::jsonb,'successor')`;await tx`UPDATE films SET active_story_revision_id=${successor} WHERE id=${superseded.filmId}`;});
+    expect((await request(`/api/films/${superseded.filmId}/attempts`,'POST',command(superseded))).status).toBe(409);
     const valid=await fixture('100','60');const admitted=attemptReceiptSchema.parse(await (await request(`/api/films/${valid.filmId}/attempts`,'POST',command(valid))).json());
-    expect((await request(`/api/films/${valid.filmId}/budget`,'PATCH',{budgetLimitUsdMicros:'59',reason:'unsafe'})).status).toBe(409);
-    const changed=await request(`/api/films/${valid.filmId}/budget`,'PATCH',{budgetLimitUsdMicros:'120',reason:'approved increase'});
+    expect((await request(`/api/films/${valid.filmId}/budget`,'PATCH',{budgetLimitUsdMicros:'59',reason:'unsafe',expectedVersion:1})).status).toBe(409);
+    const changed=await request(`/api/films/${valid.filmId}/budget`,'PATCH',{budgetLimitUsdMicros:'120',reason:'approved increase',expectedVersion:1});
     expect(changed.status).toBe(200);expect(moneyProjectionSchema.parse(await changed.json()).budgetLimitUsdMicros).toBe('120');
     expect(admitted.reservationUsdMicros).toBe('60');
   });
 
   it('posts charge/release evidence, preserves pending liabilities and replays reconciliation',async()=>{
     const f=await fixture('100','60');const admitted=attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`,'POST',command(f))).json());
-    const pending=await request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',{billingStatus:'DISPUTED',realizedChargeUsdMicros:'20',pendingLiabilityUsdMicros:'10',evidenceRef:'deterministic-adapter:test'},randomUUID());
-    expect(pending.status).toBe(200);expect(attemptFinancialDtoSchema.parse(await pending.json())).toMatchObject({billingStatus:'DISPUTED',realizedUsdMicros:'20',reservationOpenUsdMicros:'40',pendingLiabilityUsdMicros:'10'});
-    const key=randomUUID();const body={billingStatus:'FINAL',realizedChargeUsdMicros:'50',pendingLiabilityUsdMicros:'0',evidenceRef:'deterministic-adapter:final'};
+    const pending=await request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',{billingStatus:'DISPUTED',realizedChargeUsdMicros:'20',pendingLiabilityUsdMicros:'10',evidenceRef:'deterministic-adapter:test',expectedVersion:0},randomUUID());
+    expect(pending.status).toBe(200);expect(attemptFinancialDtoSchema.parse(await pending.json())).toMatchObject({billingStatus:'DISPUTED',realizedUsdMicros:'20',reservationOpenUsdMicros:'40',pendingLiabilityUsdMicros:'10',version:1});
+    expect(moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/budget`)).json()).availableUsdMicros).toBe('40');
+    const key=randomUUID();const body={billingStatus:'FINAL',realizedChargeUsdMicros:'50',pendingLiabilityUsdMicros:'0',evidenceRef:'deterministic-adapter:final',expectedVersion:1};
     const [first,second]=await Promise.all([request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',body,key),request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',body,key)]);
     expect(first.status).toBe(200);expect(second.status).toBe(200);
     const summary=moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/costs/summary`)).json());
     expect(summary).toMatchObject({actualSpentUsdMicros:'50',reservedOpenUsdMicros:'0',pendingLiabilityUsdMicros:'0'});
     const ledger=await (await request(`/api/films/${f.filmId}/costs/ledger`)).json() as {eventType:string}[];
     expect(ledger.map(e=>e.eventType)).toEqual(['RESERVATION_CREATED','CHARGE_POSTED','RESERVATION_RELEASED','CHARGE_POSTED','RESERVATION_RELEASED']);
+    expect(await auditFinancialProjection(f.filmId)).toMatchObject({matches:true});
+  });
+
+  it('rejects stale budget and reconciliation writes but replays a committed key',async()=>{
+    const f=await fixture('100','10');const admitted=attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`,'POST',command(f))).json());
+    const budgetBodies=[{budgetLimitUsdMicros:'120',reason:'first',expectedVersion:1},{budgetLimitUsdMicros:'130',reason:'second',expectedVersion:1}];
+    const budgetResults=await Promise.all(budgetBodies.map(body=>request(`/api/films/${f.filmId}/budget`,'PATCH',body,randomUUID())));
+    expect(budgetResults.map(r=>r.status).sort()).toEqual([200,409]);
+    const commands=[
+      {key:randomUUID(),body:{billingStatus:'PARTIAL',realizedChargeUsdMicros:'4',pendingLiabilityUsdMicros:'2',evidenceRef:'first',expectedVersion:0}},
+      {key:randomUUID(),body:{billingStatus:'PARTIAL',realizedChargeUsdMicros:'5',pendingLiabilityUsdMicros:'1',evidenceRef:'second',expectedVersion:0}},
+    ];
+    const results=await Promise.all(commands.map(item=>request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',item.body,item.key)));
+    expect(results.map(r=>r.status).sort()).toEqual([200,409]);
+    const winner=commands[results.findIndex(r=>r.status===200)];
+    expect((await request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',winner.body,winner.key)).status).toBe(200);
+  });
+
+  it('clamps overage availability, links corrections and detects projection drift',async()=>{
+    const f=await fixture('100','60');const admitted=attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`,'POST',command(f))).json());
+    const overage={billingStatus:'FINAL',realizedChargeUsdMicros:'120',pendingLiabilityUsdMicros:'0',evidenceRef:'overage',expectedVersion:0};
+    expect((await request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',overage)).status).toBe(200);
+    expect(moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/budget`)).json())).toMatchObject({availableUsdMicros:'0',headroomUsdMicros:'-20'});
+    const correction={billingStatus:'FINAL',realizedChargeUsdMicros:'110',pendingLiabilityUsdMicros:'0',evidenceRef:'invoice correction',expectedVersion:1};
+    expect((await request(`/api/attempts/${admitted.attemptId}/reconcile`,'POST',correction)).status).toBe(200);
+    const corrected=(await pgClient<{event_type:string;evidence:{correctionOfEventId?:string}}[]>`SELECT event_type,evidence FROM cost_ledger_events WHERE attempt_id=${admitted.attemptId} ORDER BY created_at,id`).find(event=>event.event_type==='CHARGE_CORRECTED');
+    expect(corrected?.evidence.correctionOfEventId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await auditFinancialProjection(f.filmId)).toMatchObject({matches:true});
+    await pgClient`UPDATE film_budget_accounts SET actual_spent_usd_micros=actual_spent_usd_micros+1 WHERE film_id=${f.filmId}`;
+    expect(await auditFinancialProjection(f.filmId)).toMatchObject({matches:false});
   });
 
   it('enforces append-only audit and shared security boundary',async()=>{
     const f=await fixture();
     await expect(pgClient`UPDATE budget_limit_events SET reason='tampered' WHERE film_id=${f.filmId}`).rejects.toThrow('FI_APPEND_ONLY');
     expect((await request(`/api/films/${f.filmId}/budget`,'GET',undefined,randomUUID(),{Host:'evil.test'})).status).toBe(403);
-    expect((await request(`/api/films/${f.filmId}/budget`,'PATCH',{budgetLimitUsdMicros:'101',reason:'x'},randomUUID(),{Origin:''})).status).toBe(403);
+    expect((await request(`/api/films/${f.filmId}/budget`,'PATCH',{budgetLimitUsdMicros:'101',reason:'x',expectedVersion:0},randomUUID(),{Origin:''})).status).toBe(403);
     const unauth=await api.request(`http://127.0.0.1:3000/api/films/${f.filmId}/budget`);
     expect(unauth.status).toBe(401);expect(apiErrorSchema.parse(await unauth.json()).error.requestId).toBeTruthy();
   });

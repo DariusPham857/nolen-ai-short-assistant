@@ -17,6 +17,7 @@ export const filmBudgetAccounts = pgTable('film_budget_accounts', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   check('film_budget_projection_nonnegative', sql`${table.budgetLimitUsdMicros} >= 0 AND ${table.actualSpentUsdMicros} >= 0 AND ${table.reservedOpenUsdMicros} >= 0 AND ${table.pendingLiabilityUsdMicros} >= 0 AND ${table.version} >= 0`),
+  check('film_budget_pending_within_reserved', sql`${table.pendingLiabilityUsdMicros} <= ${table.reservedOpenUsdMicros}`),
 ]);
 
 /** Append-only budget-limit audit, including the migration baseline. */
@@ -84,6 +85,7 @@ export const attemptFinancialState = pgTable('attempt_financial_state', {
 }, table => [
   check('attempt_billing_status_valid', sql`${table.billingStatus} IN ('PENDING','PARTIAL','FINAL','DISPUTED')`),
   check('attempt_financial_nonnegative', sql`${table.reservationOpenUsdMicros} >= 0 AND ${table.realizedUsdMicros} >= 0 AND ${table.pendingLiabilityUsdMicros} >= 0 AND ${table.version} >= 0`),
+  check('attempt_financial_pending_within_reserved', sql`${table.pendingLiabilityUsdMicros} <= ${table.reservationOpenUsdMicros}`),
 ]);
 
 /** Immutable financial journal. Amount is signed only for explicit corrections/adjustments. */
