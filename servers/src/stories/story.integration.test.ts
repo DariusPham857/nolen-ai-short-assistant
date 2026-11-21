@@ -131,6 +131,9 @@ it('foreign ShotRevision membership is rejected by FK; invalid references and bl
   const c=successor(first.r);c.scenes[0].shots[0].spec.locationId='foreign';
   expect((await request(first.film.id,'storyboard/revisions',{...expected(first.r),content:c})).status).toBe(422);
   expect((await read(first.film.id)).history).toHaveLength(1);
+  const mismatch=successor(first.r);mismatch.storyBible.locations.push({id:'street',name:'Street',description:'Outdoor street'});mismatch.scenes[0].shots[0].spec.locationId='street';
+  expect((await request(first.film.id,'storyboard/revisions',{...expected(first.r),content:mismatch})).status).toBe(422);
+  expect((await read(first.film.id)).history).toHaveLength(1);
   const long=canonicalStory();long.scenes[0].shots[0].spec.durationSeconds=60;
   const invalid=await setup(long);let r=await transition(invalid.film.id,invalid.r,'mark-planned');r=await transition(invalid.film.id,r,'submit-review');
   expect((await request(invalid.film.id,'storyboard/approve',expected(r))).status).toBe(422);
@@ -148,4 +151,41 @@ it('duplicate gets a new stable Shot ID; removal preserves history; identity loc
   current=await transition(film.id,current,'mark-planned');current=await transition(film.id,current,'submit-review');
   const approval=await request(film.id,'storyboard/approve',expected(current));expect(approval.status).toBe(422);
   expect(await approval.text()).toContain('IDENTITY_LOCK');
+});
+
+it('preserves approval-linked v1 evidence, validates legacy content separately under v2, and requires a v2 successor',async()=>{
+  const {film,r}=await setup();const legacyId=randomUUID();const legacyValidationId=randomUUID();const legacyContent=structuredClone(r.content);
+  legacyContent.storyBible.locations.push({id:'street',name:'Street',description:'Outdoor street'});legacyContent.scenes[0].shots[0].spec.locationId='street';
+  const legacyShotRevisions=structuredClone(r.shotRevisions);for(const shot of Object.values(legacyShotRevisions))shot.policy.ruleSetVersion='story-approval-1';
+  const legacyStored={content:legacyContent,shotRevisions:legacyShotRevisions};const legacyContentHash=hash(legacyStored);
+  const legacyDependency=hash({content:legacyContent,shots:legacyShotRevisions,target:45,context:'STORY_APPROVAL',ruleSetVersion:'story-approval-1'});
+  await pgClient.begin(async tx=>{
+    await tx`INSERT INTO story_revisions(id,film_id,parent_id,revision_no,content,content_hash) VALUES(${legacyId},${film.id},${r.id},${r.revisionNo+1},${JSON.stringify(legacyStored)}::jsonb,${legacyContentHash})`;
+    await tx`INSERT INTO story_revision_scenes(film_id,story_revision_id,scene_id,position) SELECT film_id,${legacyId},scene_id,position FROM story_revision_scenes WHERE story_revision_id=${r.id}`;
+    await tx`INSERT INTO story_revision_shots(film_id,story_revision_id,scene_id,shot_id,shot_revision_id,position) SELECT film_id,${legacyId},scene_id,shot_id,shot_revision_id,position FROM story_revision_shots WHERE story_revision_id=${r.id}`;
+    await tx`UPDATE films SET active_story_revision_id=${legacyId} WHERE id=${film.id}`;
+    await tx`INSERT INTO story_validations(id,story_revision_id,context,dependency_hash,rule_set_version,findings) VALUES(${legacyValidationId},${legacyId},'STORY_APPROVAL',${legacyDependency},'story-approval-1','[]'::jsonb)`;
+  });
+  let board=await read(film.id);expect(board.currentRuleSetVersion).toBe('story-approval-2');expect(board.validation?.id).toBe(legacyValidationId);expect(board.validation?.ruleSetVersion).toBe('story-approval-1');
+  await pgClient`UPDATE story_revisions SET state='PLANNED',state_version=1 WHERE id=${legacyId}`;
+  await pgClient`UPDATE story_revisions SET state='IN_REVIEW',state_version=2 WHERE id=${legacyId}`;
+  await pgClient`UPDATE story_revisions SET state='APPROVED',state_version=3 WHERE id=${legacyId}`;
+  const legacyEvidence={storyRevisionId:legacyId,contentHash:legacyContentHash,dependencyHash:legacyDependency,ruleSetVersion:'story-approval-1',validationRunId:legacyValidationId,waiverIds:[],waiverSetHash:hash([]),actorId:'local-operator',approvedAt:new Date().toISOString(),decision:'APPROVED'};
+  await pgClient`INSERT INTO story_approvals(id,story_revision_id,evidence) VALUES(${randomUUID()},${legacyId},${JSON.stringify(legacyEvidence)}::jsonb)`;
+  const result=await request(film.id,'continuity/validate',{expectedStoryRevisionId:legacyId,expectedStateVersion:3,context:'STORY_APPROVAL'},null);expect(result.status).toBe(200);
+  const v2=await result.json() as {id:string;ruleSetVersion:string;findings:{code:string}[]};expect(v2.ruleSetVersion).toBe('story-approval-2');expect(v2.findings.some(f=>f.code==='SCHEMA_VALID')).toBe(true);expect(v2.findings.some(f=>f.code==='POLICY_RESOLVED')).toBe(true);
+  const rows=await pgClient<{id:string;rule_set_version:string;findings:unknown}[]>`SELECT id,rule_set_version,findings FROM story_validations WHERE story_revision_id=${legacyId} ORDER BY rule_set_version`;
+  expect(rows).toHaveLength(2);expect(rows[0]).toMatchObject({id:legacyValidationId,rule_set_version:'story-approval-1',findings:[]});
+  board=await read(film.id);expect(board.validation?.id).toBe(legacyValidationId);expect(board.approval?.validationRunId).toBe(legacyValidationId);
+  const fixed=successor(board.active!);fixed.scenes[0].shots[0].spec.locationId='room';
+  expect((await request(film.id,'storyboard/revisions',{...expected(board.active!),content:fixed})).status).toBe(201);
+  board=await read(film.id);expect(Object.values(board.active!.shotRevisions).every(shot=>shot.policy.ruleSetVersion==='story-approval-2')).toBe(true);
+  let current=await transition(film.id,board.active!,'mark-planned');current=await transition(film.id,current,'submit-review');expect((await request(film.id,'storyboard/approve',expected(current))).status).toBe(200);
+  expect((await read(film.id)).approval?.ruleSetVersion).toBe('story-approval-2');
+});
+
+it('fails closed when approval references inconsistent validation evidence',async()=>{
+  const {film,r}=await setup();const evidence={storyRevisionId:r.id,contentHash:r.contentHash,dependencyHash:'missing',ruleSetVersion:'story-approval-1',validationRunId:randomUUID()};
+  await pgClient`INSERT INTO story_approvals(id,story_revision_id,evidence) VALUES(${randomUUID()},${r.id},${JSON.stringify(evidence)}::jsonb)`;
+  const response=await request(film.id,'storyboard');expect(response.status).toBe(409);expect(await response.text()).toContain('REVISION_INTEGRITY');
 });

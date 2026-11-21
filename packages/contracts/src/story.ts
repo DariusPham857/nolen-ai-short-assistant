@@ -51,7 +51,7 @@ export type Policy = z.infer<typeof policySchema>;
 export type Finding = { fingerprint:string; code:string; severity:'ERROR'|'WARNING'; path:string; message:string; waivable:boolean };
 export type StorySnapshot = { id:string; parentId:string|null; revisionNo:number; state:StoryState; stateVersion:number; contentHash:string; content:StoryContent; shotRevisions:Record<string,{id:string;dependencyHash:string;policy:Policy}> };
 export type Validation = {id:string;context:'STORY_APPROVAL';dependencyHash:string;ruleSetVersion:string;findings:Finding[]};
-export type Storyboard = {active:StorySnapshot|null; revision:StorySnapshot|null; history:{id:string;revisionNo:number;state:StoryState}[];validation:Validation|null;waivers:{id:string;findingFingerprint:string;reason:string}[];approval:Record<string,unknown>|null};
+export type Storyboard = {active:StorySnapshot|null; revision:StorySnapshot|null; history:{id:string;revisionNo:number;state:StoryState}[];currentRuleSetVersion:string;validation:Validation|null;waivers:{id:string;findingFingerprint:string;reason:string}[];approval:Record<string,unknown>|null};
 
 /** Canonical local proposal; explicitly a fixture, independent of global execution mode. */
 export function canonicalStory(): StoryContent {
