@@ -59,6 +59,19 @@ Baseline: FI branch is stacked on G1 sign-off commit `15774b4`; runtime baseline
 - isolated `fi001-review` Compose smoke: PASS for migration, web/worker health,
   Film/Story approval, FI budget persistence and restart. Test-owned containers and
   volume were removed after verification.
+- GitHub Actions run
+  [`44871385409`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44871385409):
+  PASS for both `film` and `compose` jobs at implementation commit `d52a4fd`.
+
+### Delivery status
+
+- Branch `feature/financial-integrity` contains `b50eee2` (Financial Core) and
+  `d52a4fd` (UI/acceptance evidence), stacked on G1 sign-off `15774b4`.
+- GitHub App PR creation returned `403 Resource not accessible by integration`.
+  No PR or merge is claimed; the owner can open the prepared branch at
+  <https://github.com/DariusPham857/nolen-ai-short-assistant/pull/new/feature/financial-integrity>.
+- No BLOCK or accepted CONTAIN exception remains in FI-001 local/CI review. G2 owner
+  acceptance and provider-specific G3 obligations remain external.
 
 ### Review result and deferred obligations
 
