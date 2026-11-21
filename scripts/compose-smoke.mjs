@@ -23,6 +23,8 @@ compose('stop','worker');
 const response=await fetch(`${origin}/api/films`,{method:'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify({title:'Compose persistence',brief:'Test-owned persistence check',budgetLimitUsdMicros:'0',durationTargetSeconds:45,aspectRatio:'9:16'})});
 assert.equal(response.status,201);
 const film=await response.json();
+const budget=await fetch(`${origin}/api/films/${film.id}/budget`,{headers:{Cookie:cookie}});assert.equal(budget.status,200);assert.equal((await budget.json()).budgetLimitUsdMicros,'0');
+const budgetChange=await fetch(`${origin}/api/films/${film.id}/budget`,{method:'PATCH',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify({budgetLimitUsdMicros:'1000000',reason:'Compose persistence check'})});assert.equal(budgetChange.status,200);
 /** Exercise Story without a worker or paid provider, then verify approval across a real restart. */
 async function story(route,body){const result=await fetch(`${origin}/api/films/${film.id}/storyboard/${route}`,{method:'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify(body)});assert.ok(result.ok,`Story ${route}: ${result.status}`);return result.json();}
 const initial={expectedStoryRevisionId:null,expectedStateVersion:0};
@@ -35,7 +37,8 @@ const read=await fetch(`${origin}/api/films/${film.id}`,{headers:{Cookie:cookie}
 assert.equal(read.status,200);assert.equal((await read.json()).id,film.id);
 const storyboard=await fetch(`${origin}/api/films/${film.id}/storyboard`,{headers:{Cookie:cookie}});
 assert.equal(storyboard.status,200);const persisted=await storyboard.json();assert.equal(persisted.active.state,'APPROVED');assert.equal(persisted.approval.contentHash,revision.contentHash);
+const persistedBudget=await fetch(`${origin}/api/films/${film.id}/budget`,{headers:{Cookie:cookie}});assert.equal(persistedBudget.status,200);assert.equal((await persistedBudget.json()).budgetLimitUsdMicros,'1000000');
 assert.equal((await fetch(`${origin}/api/operator/session`,{method:'DELETE',headers:{Origin:origin,Cookie:cookie}})).status,204);
 compose('restart','web');await ready();
 assert.equal((await fetch(`${origin}/api/films/${film.id}`,{headers:{Cookie:cookie}})).status,401);
-console.log('PASS: canonical ports, worker-independent Film/Story approval, persistence across restart, durable logout across restart');
+console.log('PASS: canonical ports, worker-independent Film/Story approval, FI budget persistence, durable logout across restart');

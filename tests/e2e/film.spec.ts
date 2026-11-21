@@ -16,7 +16,7 @@ async function fill(page:import('@playwright/test').Page,title:string) {
   await page.getByLabel('Budget limit (USD)').fill('9007199254.740993');
 }
 
-test('unlock, create, reload, logout and copied-cookie replay',async({page,request})=>{
+test('unlock, create, budget persistence, reload, logout and copied-cookie replay',async({page,request})=>{
   await unlock(page);
   const database=postgres(process.env.DATABASE_URL!,{max:1});
   await database`ALTER TABLE operator_sessions RENAME TO operator_sessions_unavailable`;
@@ -34,6 +34,12 @@ test('unlock, create, reload, logout and copied-cookie replay',async({page,reque
   const url=page.url(); const reloaded=await page.reload();
   expect(reloaded?.headers()['cache-control']).toContain('no-store');
   await expect(page.getByRole('heading',{name:'Persistent Film'})).toBeVisible();
+  await page.getByRole('link',{name:'Budget status'}).click();await expect(page).toHaveURL(/\/budget$/);
+  await expect(page.getByText('$9007199254.740993').first()).toBeVisible();
+  await page.getByLabel('New limit (USD)').fill('9007199255.000000');await page.getByLabel('Audit reason').fill('Owner-approved test adjustment');
+  await page.getByRole('button',{name:'Update limit'}).click();await expect(page.getByText('$9007199255.000000').first()).toBeVisible();
+  await page.reload();await expect(page.getByText('$9007199255.000000').first()).toBeVisible();
+  await page.screenshot({path:test.info().outputPath('budget-status.png'),fullPage:true});
   const cookies=await page.context().cookies();
   const old=cookies.find(c=>c.name==='nolen_session')!;
   await page.getByRole('button',{name:'Lock workspace'}).click();
