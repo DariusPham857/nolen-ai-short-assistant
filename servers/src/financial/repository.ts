@@ -3,6 +3,7 @@ import type postgres from 'postgres';
 import type { CreateAttempt, EstimateAttempt, ReconcileAttempt, UpdateBudget } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { ApiFailure } from '../http/errors.js';
+import { RULESET } from '../stories/domain.js';
 import { add, assertAdmission, estimate, projection, subtract, type Projection, type Rate } from './domain.js';
 
 type Tx = postgres.TransactionSql;
@@ -21,6 +22,7 @@ type FinancialRow = {
   reservation_usd_micros: string;
   billing_status: 'PENDING'|'PARTIAL'|'FINAL'|'DISPUTED'; reservation_open_usd_micros: string;
   realized_usd_micros: string; pending_liability_usd_micros: string;
+  version: number;
   outbox_status: 'PENDING'|'DELIVERING'|'DELIVERED';
   enqueue_outcome: 'NOT_ATTEMPTED'|'JOB_ID'|'NULL_UNVERIFIED'|'UNKNOWN_ENQUEUE_OUTCOME'|'WORKER_CONFIRMED';
 };
@@ -41,7 +43,7 @@ function accountProjection(row: AccountRow): Projection {
 
 function projectionDto(row: AccountRow) {
   const value = projection(accountProjection(row));
-  return { ...Object.fromEntries(Object.entries(value).map(([key,item]) => [key, typeof item === 'bigint' ? item.toString() : item])) };
+  return { ...Object.fromEntries(Object.entries(value).map(([key,item]) => [key, typeof item === 'bigint' ? item.toString() : item])), version:row.version };
 }
 
 function rateValue(row: RateRow): Rate {
@@ -95,6 +97,7 @@ export async function changeBudget(filmId:string,operatorId:string,key:string,in
     const account=await ownedAccount(tx,filmId,operatorId,true);
     const replay=await receipt<ReturnType<typeof projectionDto>>(tx,filmId,operatorId,key,'CHANGE_BUDGET',requestHash);
     if(replay)return replay;
+    if(account.version!==input.expectedVersion)throw new ApiFailure(409,'VERSION_CONFLICT','Budget projection changed; reload before editing');
     const next=BigInt(input.budgetLimitUsdMicros);const committed=add(BigInt(account.actual_spent_usd_micros),BigInt(account.reserved_open_usd_micros));
     if(next<committed)throw new ApiFailure(409,'BUDGET_BELOW_COMMITTED','New limit cannot be below spent plus open reservations');
     const nextValue=next.toString();
@@ -113,8 +116,18 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
     const account=await ownedAccount(tx,filmId,operatorId,true);
     const replay=await receipt<AttemptReceipt>(tx,filmId,operatorId,key,'ADMIT_ATTEMPT',requestHash);
     if(replay)return replay;
-    const [story]=await tx<{id:string}[]>`SELECT id FROM story_revisions WHERE id=${input.storyRevisionId} AND film_id=${filmId} AND state='APPROVED'`;
-    if(!story)throw new ApiFailure(409,'APPROVED_STORY_REQUIRED','Attempt requires an approved StoryRevision in this Film');
+    const [story]=await tx<{id:string}[]>`SELECT sr.id FROM films f
+      JOIN story_revisions sr ON sr.id=f.active_story_revision_id AND sr.film_id=f.id
+      JOIN story_approvals sa ON sa.story_revision_id=sr.id
+      JOIN story_validations sv ON sv.story_revision_id=sr.id
+        AND sv.id::text=sa.evidence->>'validationRunId'
+        AND sv.context='STORY_APPROVAL'
+        AND sv.dependency_hash=sa.evidence->>'dependencyHash'
+        AND sv.rule_set_version=sa.evidence->>'ruleSetVersion'
+      WHERE f.id=${filmId} AND f.operator_id=${operatorId} AND sr.id=${input.storyRevisionId} AND sr.state='APPROVED'
+        AND sa.evidence->>'storyRevisionId'=sr.id::text AND sa.evidence->>'contentHash'=sr.content_hash
+        AND sa.evidence->>'ruleSetVersion'=${RULESET}`;
+    if(!story)throw new ApiFailure(409,'CURRENT_APPROVAL_REQUIRED','Attempt requires the active StoryRevision with current approval evidence');
     if(['IMAGE','VIDEO'].includes(input.kind) && !input.shotRevisionId)throw new ApiFailure(422,'SHOT_REVISION_REQUIRED','Image and video attempts require a ShotRevision');
     if(input.shotRevisionId){
       const [shot]=await tx<{id:string}[]>`SELECT sr.id FROM shot_revisions sr JOIN story_revision_shots m ON m.film_id=sr.film_id AND m.shot_revision_id=sr.id WHERE sr.id=${input.shotRevisionId} AND sr.film_id=${filmId} AND m.story_revision_id=${input.storyRevisionId}`;
@@ -142,11 +155,11 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
 
 function financialDto(row:FinancialRow){return {attemptId:row.attempt_id,filmId:row.film_id,state:row.state,billingStatus:row.billing_status,
   reservationOpenUsdMicros:String(row.reservation_open_usd_micros),realizedUsdMicros:String(row.realized_usd_micros),pendingLiabilityUsdMicros:String(row.pending_liability_usd_micros),
-  rateCardSnapshotId:row.rate_card_snapshot_id,outboxStatus:row.outbox_status,enqueueOutcome:row.enqueue_outcome};}
+  rateCardSnapshotId:row.rate_card_snapshot_id,outboxStatus:row.outbox_status,enqueueOutcome:row.enqueue_outcome,version:row.version};}
 
 async function financialRow(tx:Tx,attemptId:string,operatorId:string,lock:boolean):Promise<FinancialRow>{
   const suffix=lock?' FOR UPDATE OF fs':'';
-  const rows=await tx.unsafe<FinancialRow[]>(`SELECT a.id AS attempt_id,a.film_id,a.state,a.rate_card_snapshot_id,a.reservation_usd_micros,fs.billing_status,fs.reservation_open_usd_micros,fs.realized_usd_micros,fs.pending_liability_usd_micros,o.status AS outbox_status,o.enqueue_outcome FROM attempts a JOIN films f ON f.id=a.film_id JOIN attempt_financial_state fs ON fs.attempt_id=a.id JOIN dispatch_outbox o ON o.attempt_id=a.id WHERE a.id=$1 AND f.operator_id=$2${suffix}`,[attemptId,operatorId]);
+  const rows=await tx.unsafe<FinancialRow[]>(`SELECT a.id AS attempt_id,a.film_id,a.state,a.rate_card_snapshot_id,a.reservation_usd_micros,fs.billing_status,fs.reservation_open_usd_micros,fs.realized_usd_micros,fs.pending_liability_usd_micros,fs.version,o.status AS outbox_status,o.enqueue_outcome FROM attempts a JOIN films f ON f.id=a.film_id JOIN attempt_financial_state fs ON fs.attempt_id=a.id JOIN dispatch_outbox o ON o.attempt_id=a.id WHERE a.id=$1 AND f.operator_id=$2${suffix}`,[attemptId,operatorId]);
   if(!rows[0])throw new ApiFailure(404,'ATTEMPT_NOT_FOUND','Attempt not found');return rows[0];
 }
 
@@ -156,22 +169,31 @@ export async function readAttemptFinancial(attemptId:string,operatorId:string){r
 export async function reconcileAttempt(attemptId:string,operatorId:string,key:string,input:ReconcileAttempt){
   const requestHash=digest(input);
   return pgClient.begin('isolation level read committed',async tx=>{
-    const current=await financialRow(tx,attemptId,operatorId,true);const account=await ownedAccount(tx,current.film_id,operatorId,true);
+    const [attempt]=await tx<{film_id:string}[]>`SELECT a.film_id FROM attempts a JOIN films f ON f.id=a.film_id WHERE a.id=${attemptId} AND f.operator_id=${operatorId}`;
+    if(!attempt)throw new ApiFailure(404,'ATTEMPT_NOT_FOUND','Attempt not found');
+    const account=await ownedAccount(tx,attempt.film_id,operatorId,true);const current=await financialRow(tx,attemptId,operatorId,true);
     const replay=await receipt<ReturnType<typeof financialDto>>(tx,current.film_id,operatorId,key,'RECONCILE_ATTEMPT',requestHash);if(replay)return replay;
+    if(current.version!==input.expectedVersion)throw new ApiFailure(409,'VERSION_CONFLICT','Attempt financial state changed; reload before reconciling');
     const oldRealized=BigInt(current.realized_usd_micros),oldOpen=BigInt(current.reservation_open_usd_micros),oldPending=BigInt(current.pending_liability_usd_micros);
     const nextRealized=BigInt(input.realizedChargeUsdMicros),nextPending=BigInt(input.pendingLiabilityUsdMicros);
     if(input.billingStatus==='FINAL'&&nextPending!==0n)throw new ApiFailure(422,'FINAL_BILLING_HAS_PENDING','Final billing cannot retain a pending liability');
     const originalReservation=BigInt(current.reservation_usd_micros);
-    const nextOpen=input.billingStatus==='FINAL'?0n:(nextRealized>=originalReservation?0n:subtract(originalReservation,nextRealized));
+    const remaining=nextRealized>=originalReservation?0n:subtract(originalReservation,nextRealized);
+    const nextOpen=input.billingStatus==='FINAL'?0n:(nextPending>remaining?nextPending:remaining);
     const spent=add(BigInt(account.actual_spent_usd_micros),nextRealized-oldRealized);
     const reserved=add(BigInt(account.reserved_open_usd_micros),nextOpen-oldOpen);
     const pending=add(BigInt(account.pending_liability_usd_micros),nextPending-oldPending);
     projection({budgetLimitUsdMicros:BigInt(account.budget_limit_usd_micros),actualSpentUsdMicros:spent,reservedOpenUsdMicros:reserved,pendingLiabilityUsdMicros:pending});
-    if(nextRealized!==oldRealized)await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at) VALUES(${randomUUID()},${current.film_id},${attemptId},${nextRealized>oldRealized?'CHARGE_POSTED':'CHARGE_CORRECTED'},${(nextRealized-oldRealized).toString()},${input.billingStatus},${JSON.stringify({evidenceRef:input.evidenceRef})}::jsonb,GREATEST(clock_timestamp(),COALESCE((SELECT max(created_at)+interval '1 microsecond' FROM cost_ledger_events WHERE attempt_id=${attemptId}),'-infinity'::timestamptz)))`;
+    if(nextRealized!==oldRealized){
+      const [prior]=nextRealized<oldRealized?await tx<{id:string}[]>`SELECT id FROM cost_ledger_events WHERE attempt_id=${attemptId} AND event_type IN ('CHARGE_POSTED','CHARGE_CORRECTED') ORDER BY created_at DESC,id DESC LIMIT 1`:[];
+      if(nextRealized<oldRealized&&!prior)throw new ApiFailure(409,'FINANCIAL_INTEGRITY','Correction requires a prior charge event');
+      const evidence={evidenceRef:input.evidenceRef,...(prior?{correctionOfEventId:prior.id}:{})};
+      await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at) VALUES(${randomUUID()},${current.film_id},${attemptId},${nextRealized>oldRealized?'CHARGE_POSTED':'CHARGE_CORRECTED'},${(nextRealized-oldRealized).toString()},${input.billingStatus},${JSON.stringify(evidence)}::jsonb,GREATEST(clock_timestamp(),COALESCE((SELECT max(created_at)+interval '1 microsecond' FROM cost_ledger_events WHERE attempt_id=${attemptId}),'-infinity'::timestamptz)))`;
+    }
     if(nextOpen!==oldOpen)await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at) VALUES(${randomUUID()},${current.film_id},${attemptId},${nextOpen<oldOpen?'RESERVATION_RELEASED':'RESERVATION_ADJUSTED'},${(nextOpen<oldOpen?oldOpen-nextOpen:nextOpen-oldOpen).toString()},${input.billingStatus},${JSON.stringify({evidenceRef:input.evidenceRef})}::jsonb,GREATEST(clock_timestamp(),COALESCE((SELECT max(created_at)+interval '1 microsecond' FROM cost_ledger_events WHERE attempt_id=${attemptId}),'-infinity'::timestamptz)))`;
     await tx`UPDATE attempt_financial_state SET billing_status=${input.billingStatus},reservation_open_usd_micros=${nextOpen.toString()},realized_usd_micros=${nextRealized.toString()},pending_liability_usd_micros=${nextPending.toString()},version=version+1,updated_at=now() WHERE attempt_id=${attemptId}`;
     await tx`UPDATE film_budget_accounts SET actual_spent_usd_micros=${spent.toString()},reserved_open_usd_micros=${reserved.toString()},pending_liability_usd_micros=${pending.toString()},version=version+1,updated_at=now() WHERE film_id=${current.film_id}`;
-    const response=financialDto({...current,billing_status:input.billingStatus,reservation_open_usd_micros:nextOpen.toString(),realized_usd_micros:nextRealized.toString(),pending_liability_usd_micros:nextPending.toString()});
+    const response=financialDto({...current,billing_status:input.billingStatus,reservation_open_usd_micros:nextOpen.toString(),realized_usd_micros:nextRealized.toString(),pending_liability_usd_micros:nextPending.toString(),version:current.version+1});
     await saveReceipt(tx,current.film_id,operatorId,key,'RECONCILE_ATTEMPT',requestHash,response);return response;
   });
 }
@@ -182,4 +204,18 @@ export async function readLedger(filmId:string,operatorId:string){return pgClien
 });}
 
 export async function readSummary(filmId:string,operatorId:string){return readBudget(filmId,operatorId);}
+
+/** Compare immutable event/attempt sums with the locked Film projection without repairing drift. */
+export async function auditFinancialProjection(filmId:string){
+  const [account]=await pgClient<{actual_spent_usd_micros:string;reserved_open_usd_micros:string;pending_liability_usd_micros:string}[]>`SELECT actual_spent_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${filmId}`;
+  if(!account)throw new ApiFailure(404,'FILM_NOT_FOUND','Film not found');
+  const [events]=await pgClient<{actual:string;reserved:string}[]>`SELECT
+    COALESCE(sum(CASE WHEN event_type IN ('CHARGE_POSTED','CHARGE_CORRECTED') THEN amount_usd_micros ELSE 0 END),0)::text AS actual,
+    COALESCE(sum(CASE WHEN event_type='RESERVATION_CREATED' THEN amount_usd_micros WHEN event_type='RESERVATION_RELEASED' THEN -amount_usd_micros WHEN event_type='RESERVATION_ADJUSTED' THEN amount_usd_micros ELSE 0 END),0)::text AS reserved
+    FROM cost_ledger_events WHERE film_id=${filmId}`;
+  const [attempts]=await pgClient<{pending:string}[]>`SELECT COALESCE(sum(fs.pending_liability_usd_micros),0)::text AS pending FROM attempt_financial_state fs JOIN attempts a ON a.id=fs.attempt_id WHERE a.film_id=${filmId}`;
+  const expected={actualSpentUsdMicros:events.actual,reservedOpenUsdMicros:events.reserved,pendingLiabilityUsdMicros:attempts.pending};
+  const stored={actualSpentUsdMicros:String(account.actual_spent_usd_micros),reservedOpenUsdMicros:String(account.reserved_open_usd_micros),pendingLiabilityUsdMicros:String(account.pending_liability_usd_micros)};
+  return {filmId,matches:expected.actualSpentUsdMicros===stored.actualSpentUsdMicros&&expected.reservedOpenUsdMicros===stored.reservedOpenUsdMicros&&expected.pendingLiabilityUsdMicros===stored.pendingLiabilityUsdMicros,expected,stored};
+}
 

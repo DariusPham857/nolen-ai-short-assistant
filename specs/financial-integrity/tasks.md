@@ -1,6 +1,6 @@
 # FI-001 tasks
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: IMPLEMENTED_VERIFIED_PENDING_CI_AND_OWNER_SIGNOFF
 Source: [approved specification](spec.md)
 
 ## Tasks
@@ -9,19 +9,19 @@ Source: [approved specification](spec.md)
 |---|---|---|
 | G1-SIGNOFF | PASS: recorded accepted G1 without changing runtime | `pnpm check:evidence`; SP-001 status and merge evidence |
 | FI-01 | PASS: Financial Core contracts and partial/deferred boundaries frozen | evidence validator; AT-P02-01–20 mapped |
-| FI-02 | PASS: additive state-3 schema, backfill and immutable guards | PostgreSQL 16 migration/preflight/drift tests; AT-08/19 |
+| FI-02 | PASS: additive state-4 projection constraint; state-3 upgrade/rollback evidence | PostgreSQL 16 migration/preflight/drift tests; supplemental migration acceptance |
 | FI-03 | PASS: checked micros, rates, reservation and projection domain | unit/boundary tests; AT-01/06/07/10 |
 | FI-04a | PASS: pinned pg-boss 10.4.2 send/null/crash compatibility | PostgreSQL 16 + pg-boss integration; AT-14/15 |
 | FI-04b | PASS: atomic admission, receipts, ledger, outbox and worker claim | concurrency/integration tests; AT-02–05/11 |
 | FI-05 | PASS: settlement and reconciliation transitions | PostgreSQL integration; AT-12/13/18 |
 | FI-06 | PASS: protected Financial API and exact JSON DTOs | Hono/PG16 tests; AT-16/20 |
 | FI-07 | PASS: budget status and limit audit UI | Playwright production flow; AT-17 |
-| FI-08 | PASS locally: full verification, Compose and adversarial review | no BLOCK; CI and owner sign-off remain external |
+| FI-08 | PASS locally: full verification, Compose and adversarial review | no BLOCK; patch CI and owner sign-off remain external |
 
 ## Handoff
 
-Baseline: FI branch is stacked on G1 sign-off commit `15774b4`; runtime baseline is
-`main@d4e59c38838776982bf3c5a9fc8be4433eef34b2` (PR #6 merged).
+Baseline: `main@919d47d` (PR #7 merged). Correctness remediation is isolated on
+`fix/financial-integrity-correctness-v2`; no G3/provider work is included.
 
 - G1-SIGNOFF: [SP spec](../story-planning/spec.md) and [tasks](../story-planning/tasks.md)
   updated to `G1_ACCEPTED`; `pnpm check:evidence` PASS (20 documents). Commit
@@ -34,8 +34,9 @@ Baseline: FI branch is stacked on G1 sign-off commit `15774b4`; runtime baseline
 ### Registered files and interfaces
 
 - `packages/contracts/src/financial.ts`: exact-money command and DTO contracts.
-- `servers/src/db/schema/financial.ts`, migration `0002_sloppy_lilandra.sql`, and
-  `state-3.json`: accounts, attempts, immutable ledger/audit, receipts and outbox.
+- `servers/src/db/schema/financial.ts`, immutable migration `0002_sloppy_lilandra.sql`,
+  additive migration `0003_tough_quicksilver.sql`, and `state-4.json`: accounts,
+  attempts, immutable ledger/audit, receipts, outbox and pending-within-reserved guards.
 - `servers/src/financial/`: checked arithmetic, atomic admission, reconciliation,
   pinned queue relay recovery and durable worker claim.
 - `servers/src/http/financial-api.ts`: protected budget, estimate, attempt, ledger,
@@ -45,33 +46,29 @@ Baseline: FI branch is stacked on G1 sign-off commit `15774b4`; runtime baseline
 - PostgreSQL, migration, API, Playwright and Compose checks cover AT-P02-01–20 at the
   explicit partial/deferred boundaries in the specification.
 
-### Verification evidence (2026-11-21)
+### Verification evidence (2026-11-21 correctness remediation)
 
 - `pnpm test`: PASS, contracts 5/5 and server unit 21/21.
-- `pnpm lint`, `pnpm typecheck`, `pnpm build`: PASS. The build and client negative
-  boundary fixture required an unrestricted rerun after Windows sandbox `EPERM`.
+- `pnpm lint`, `pnpm typecheck`, `pnpm build`: PASS. The first sandboxed build hit
+  Windows `EPERM` under `.next`; the unrestricted rerun completed successfully.
 - `pnpm test:guardrails`: PASS 4/4; `pnpm test:evidence`: PASS 4/4;
   `pnpm check:evidence`: PASS for 22 documents; client boundary: PASS 2/2.
-- `pnpm test:integration` on PostgreSQL 16: PASS 31/31 across migration, Film, Story,
-  Financial Core and health suites, including same-key concurrency, backfill,
-  immutable drift, pg-boss 10.4.2 job-ID/null/throw recovery and one durable claim.
-- `pnpm test:e2e`: PASS 10/10, including budget audit persistence after reload.
-- isolated `fi001-review` Compose smoke: PASS for migration, web/worker health,
-  Film/Story approval, FI budget persistence and restart. Test-owned containers and
-  volume were removed after verification.
-- GitHub Actions run
-  [`44871385409`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44871385409):
-  PASS for both `film` and `compose` jobs at implementation commit `d52a4fd`.
+- `pnpm test:integration -- --silent` on PostgreSQL 16: PASS 34/34, including
+  state-3 to state-4 preservation/rollback, stale versions, current Story approval
+  evidence, overage, corrections, projection audit and lock-order concurrency.
+- `pnpm db:migrate`: PASS with exact state-4 preflight; applied migration `0002`
+  remained unchanged.
+- `pnpm test:e2e`: PASS 10/10. Isolated `fi001-correctness-v2` Compose smoke:
+  PASS for migration, web/worker health, Film/Story approval, budget persistence and
+  restart. Its containers/network/volume were removed after verification.
+- Patch GitHub Actions: pending push; a missing run is not PASS.
 
 ### Delivery status
 
-- Branch `feature/financial-integrity` contains `b50eee2` (Financial Core) and
-  `d52a4fd` (UI/acceptance evidence), stacked on G1 sign-off `15774b4`.
-- GitHub App PR creation returned `403 Resource not accessible by integration`.
-  No PR or merge is claimed; the owner can open the prepared branch at
-  <https://github.com/DariusPham857/nolen-ai-short-assistant/pull/new/feature/financial-integrity>.
-- No BLOCK or accepted CONTAIN exception remains in FI-001 local/CI review. G2 owner
-  acceptance and provider-specific G3 obligations remain external.
+- Branch `fix/financial-integrity-correctness-v2` is based on merged PR #7 at
+  `main@919d47d`; patch commit/PR/CI evidence will be recorded after publication.
+- No BLOCK or accepted CONTAIN exception remains in the local review. Patch CI, G2
+  owner acceptance and provider-specific G3 obligations remain external.
 
 ### Review result and deferred obligations
 

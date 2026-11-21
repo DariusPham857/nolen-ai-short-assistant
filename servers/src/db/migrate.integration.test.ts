@@ -22,14 +22,14 @@ it('migrates fresh database and accepts a complete valid journal repeatedly', as
   await withDatabase(async (url, client) => {
     await migrateDatabase(url);
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(4);
     expect(await client`SELECT * FROM films`).toHaveLength(0);
   });
 });
 
 it('FI append-only trigger/function drift blocks migration before repair',async()=>{
   for(const mutation of ['ALTER TABLE cost_ledger_events DISABLE TRIGGER fi_cost_ledger_events_append_only','DROP TRIGGER fi_budget_limit_events_append_only ON budget_limit_events',"CREATE OR REPLACE FUNCTION fi_guard_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"]){
-    await withDatabase(async(url,client)=>{await migrateDatabase(url);await client.unsafe(mutation);await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);});
+    await withDatabase(async(url,client)=>{await migrateDatabase(url);await client.unsafe(mutation);await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(4);});
   }
 });
 
@@ -38,7 +38,7 @@ it('SP guard trigger/function drift blocks migration before any repair',async()=
     await withDatabase(async(url,client)=>{
       await migrateDatabase(url);await client.unsafe(mutation);
       await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');
-      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);
+      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(4);
     });
   }
 });
@@ -68,6 +68,30 @@ it('upgrades an FC-only database without changing the original Film DTO or times
     expect((await client`SELECT to_regclass('public.story_revisions') AS name`)[0].name).toBeNull();
     expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(1);
     expect((await client`SELECT title FROM films`)[0].title).toBe('Unsupported');
+  });
+});
+
+it('upgrades FI state-3 to state-4 without data loss and rejects incompatible pending projections atomically',async()=>{
+  const folder=mkdtempSync(path.join(tmpdir(),'fi-state-3-'));
+  cpSync(migrationFolder,folder,{recursive:true});
+  const journalFile=path.join(folder,'meta/_journal.json');
+  const journal=JSON.parse(readFileSync(journalFile,'utf8')) as {entries:unknown[]};
+  journal.entries=journal.entries.slice(0,3);writeFileSync(journalFile,JSON.stringify(journal));
+  await withDatabase(async(url,client)=>{
+    await migrateDatabase(url,folder);const id=randomUUID();
+    await client`INSERT INTO films(id,title,brief,budget_limit_usd_micros,operator_id,idempotency_key,request_hash) VALUES(${id},'FI state-3','Preserve projection',100,'local-operator',${randomUUID()},'state-3')`;
+    await client`INSERT INTO film_budget_accounts(film_id,operator_id,budget_limit_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros) VALUES(${id},'local-operator',100,40,20)`;
+    await migrateDatabase(url);
+    expect((await client`SELECT budget_limit_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${id}`)[0]).toMatchObject({budget_limit_usd_micros:'100',reserved_open_usd_micros:'40',pending_liability_usd_micros:'20'});
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(4);
+  });
+  await withDatabase(async(url,client)=>{
+    await migrateDatabase(url,folder);const id=randomUUID();
+    await client`INSERT INTO films(id,title,brief,budget_limit_usd_micros,operator_id,idempotency_key,request_hash) VALUES(${id},'Invalid FI state-3','Must block',100,'local-operator',${randomUUID()},'state-3-invalid')`;
+    await client`INSERT INTO film_budget_accounts(film_id,operator_id,budget_limit_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros) VALUES(${id},'local-operator',100,10,20)`;
+    await expect(migrateDatabase(url)).rejects.toThrow();
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(3);
+    expect((await client`SELECT reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${id}`)[0]).toMatchObject({reserved_open_usd_micros:'10',pending_liability_usd_micros:'20'});
   });
 });
 

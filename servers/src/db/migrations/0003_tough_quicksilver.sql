@@ -1,0 +1,2 @@
+ALTER TABLE "attempt_financial_state" ADD CONSTRAINT "attempt_financial_pending_within_reserved" CHECK ("attempt_financial_state"."pending_liability_usd_micros" <= "attempt_financial_state"."reservation_open_usd_micros");--> statement-breakpoint
+ALTER TABLE "film_budget_accounts" ADD CONSTRAINT "film_budget_pending_within_reserved" CHECK ("film_budget_accounts"."pending_liability_usd_micros" <= "film_budget_accounts"."reserved_open_usd_micros");

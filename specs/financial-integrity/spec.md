@@ -1,6 +1,6 @@
 # FI-001 — Financial Ledger & Atomic Budget Admission (G2)
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: IMPLEMENTED_VERIFIED_PENDING_CI_AND_OWNER_SIGNOFF
 Source: [PRD v1.0 §17](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
 ## Goal
@@ -70,26 +70,33 @@ implicit fake provider/rate card; deterministic fixtures are test-only.
 
 ## Acceptance criteria
 
-- `AT-P02-01` exact micros survive create, projection, ledger and JSON beyond JS safe integers.
-- `AT-P02-02` admission atomically creates one Attempt/reservation/outbox and never overspends.
-- `AT-P02-03` 20 concurrent same-key requests return one Attempt and one financial admission.
-- `AT-P02-04` different keys competing for insufficient headroom admit only the valid subset.
-- `AT-P02-05` changed payload under a used key returns conflict without writes.
-- `AT-P02-06` missing/stale/unsupported rate card blocks before reservation.
-- `AT-P02-07` checked arithmetic rejects overflow and invalid negative projections.
-- `AT-P02-08` append-only guards reject UPDATE/DELETE of ledger and budget-limit events.
-- `AT-P02-09` budget limit changes are audited; unsafe decrease is rejected.
-- `AT-P02-10` 80% warning and available/pending/reserved projections are exact.
-- `AT-P02-11` PARTIAL: internal duplicate delivery/claim safety only; provider exactly-once is G3.
-- `AT-P02-12` charge/release/adjust/correct settlement preserves projection invariants.
-- `AT-P02-13` unknown/delayed charge remains PENDING or DISPUTED, never assumed zero.
-- `AT-P02-14` outbox `send()` ID/null/throw paths do not create another admission.
-- `AT-P02-15` crash after enqueue but before acknowledgement is recoverable by attempt ID.
-- `AT-P02-16` all APIs enforce auth/ownership/Host/Origin/idempotency/error envelopes.
-- `AT-P02-17` browser shows Limit, Spent, Reserved, Pending and Available after reload.
-- `AT-P02-18` PARTIAL: deterministic billing-adapter reconciliation only; provider evidence is G3.
-- `AT-P02-19` migration backfills one account/audit baseline per existing Film without reset.
-- `AT-P02-20` PARTIAL: ledger JSON/API evidence only; benchmark export is a later feature.
+Canonical PRD identifiers retain their original meaning:
+
+- `AT-P02-01` boundary equality (`B=10,S=6,R=2,N=2`) admits exactly one reservation and dispatch intent.
+- `AT-P02-02` an over-budget request is rejected without Attempt, reservation, outbox or provider side effect.
+- `AT-P02-03` concurrent requests competing for one remaining allowance admit exactly one under the account lock.
+- `AT-P02-04` same key and payload replay the same Attempt without duplicate financial state.
+- `AT-P02-05` same key with changed payload returns `409 IDEMPOTENCY_CONFLICT` without writes.
+- `AT-P02-06` successful billing posts the realized charge and releases the unused reservation exactly once.
+- `AT-P02-07` provider overage is fully recorded, exposes negative headroom with zero available, and blocks new admissions.
+- `AT-P02-08` an unknown charge remains `PENDING`; its liability stays inside the open reservation.
+- `AT-P02-09` confirmed non-acceptance/no-charge releases the full reservation once and retains the failed Attempt.
+- `AT-P02-10` duplicate completion/reconciliation replays one canonical settlement.
+- `AT-P02-11` **PARTIAL/DEFERRED:** internal ambiguous enqueue recovery exists; external `SUBMISSION_UNCERTAIN` provider reconciliation belongs to G3.
+- `AT-P02-12` a versioned budget increase appends audit evidence and never auto-launches a blocked job.
+- `AT-P02-13` concurrent/stale budget edits return `409 VERSION_CONFLICT`; only the accepted edit is audited.
+- `AT-P02-14` a decrease below spent plus open reservations is rejected without mutation.
+- `AT-P02-15` crossing 80% warns while eligible jobs within the hard limit remain admissible.
+- `AT-P02-16` missing, stale or unsupported rate-card input blocks before dispatch.
+- `AT-P02-17` a later correction is append-only, links the prior charge event and recomputes projections.
+- `AT-P02-18` **PARTIAL/DEFERRED:** Financial Core records realized charges; rejected-media/provider/export evidence belongs to G3+.
+- `AT-P02-19` **PARTIAL/DEFERRED:** a manual retry is a new financial Attempt; rejected-media workflow belongs to a later feature.
+- `AT-P02-20` **PARTIAL/DEFERRED:** internal queue redelivery has one durable claim; remotely chargeable submission guarantees depend on G3 provider support.
+
+Supplemental FI-001 acceptance covers checked `BIGINT` overflow, state-3 to state-4
+migration compatibility, append-only drift, protected API envelopes, exact JSON DTOs,
+pg-boss 10.4.2 ID/null/throw recovery, active/current Story approval evidence,
+projection audit, and browser persistence. These checks do not redefine the PRD IDs.
 
 ## Open Questions / Blocked Contracts
 
