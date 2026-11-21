@@ -1,6 +1,6 @@
 # FI-001 — Financial Ledger & Atomic Budget Admission (G2)
 
-Status: IMPLEMENTED_VERIFIED_PENDING_CI_AND_OWNER_SIGNOFF
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [PRD v1.0 §17](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
 ## Goal

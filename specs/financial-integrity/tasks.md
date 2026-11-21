@@ -1,6 +1,6 @@
 # FI-001 tasks
 
-Status: IMPLEMENTED_VERIFIED_PENDING_CI_AND_OWNER_SIGNOFF
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [approved specification](spec.md)
 
 ## Tasks
@@ -61,14 +61,19 @@ Baseline: `main@919d47d` (PR #7 merged). Correctness remediation is isolated on
 - `pnpm test:e2e`: PASS 10/10. Isolated `fi001-correctness-v2` Compose smoke:
   PASS for migration, web/worker health, Film/Story approval, budget persistence and
   restart. Its containers/network/volume were removed after verification.
-- Patch GitHub Actions: pending push; a missing run is not PASS.
+- GitHub Actions push run
+  [`44877988794`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44877988794):
+  PASS for both `film` and `compose` jobs at implementation commit `4e3a674e`.
 
 ### Delivery status
 
 - Branch `fix/financial-integrity-correctness-v2` is based on merged PR #7 at
-  `main@919d47d`; patch commit/PR/CI evidence will be recorded after publication.
-- No BLOCK or accepted CONTAIN exception remains in the local review. Patch CI, G2
-  owner acceptance and provider-specific G3 obligations remain external.
+  `main@919d47d`; implementation commit `4e3a674e` is pushed and CI-verified.
+- PR creation is BLOCKED by GitHub App permission (`403 Resource not accessible by
+  integration`); no PR or merge is claimed. Owner link:
+  <https://github.com/DariusPham857/nolen-ai-short-assistant/pull/new/fix/financial-integrity-correctness-v2>.
+- No BLOCK or accepted CONTAIN exception remains in local/CI review. G2 owner
+  acceptance and provider-specific G3 obligations remain external.
 
 ### Review result and deferred obligations
 
