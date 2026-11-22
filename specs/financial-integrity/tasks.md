@@ -56,11 +56,12 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 - `pnpm lint`, `pnpm typecheck`, `pnpm build`: PASS (0 errors, 0 warnings).
 - `pnpm test:guardrails`: PASS 4/4; `pnpm test:evidence`: PASS 4/4;
   `pnpm check:evidence`: PASS for 22 documents; client boundary: PASS 2/2.
-- PostgreSQL 16 interleaving tests in `financial.integration.test.ts`:
+- PostgreSQL 16 interleaving tests in `financial.integration.test.ts` (verified via CI PostgreSQL 16 service container):
   1. `blocks attempt admission from committing on a superseded StoryRevision during concurrent mutation`: PASS.
   2. `guarantees consistent audit snapshot without false drift during concurrent settlement`: PASS.
-- Pre-existing PR #8 CI: push run [`44878462711`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44878462711)
-  passed for both `film` and `compose` jobs before merge commit `b2b16ff`.
+- CI pipeline: PR #9 GitHub Actions push runs [`44994675307`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44994675307)
+  (passed) and [`44996535160`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44996535160)
+  verify PostgreSQL 16 integration, unit, lint, typecheck, build, and Compose smoke.
 
 ### Delivery status
 
@@ -70,9 +71,8 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
   - `dd0c2ad` (fix: synchronize admission with story lock and repeatable-read audit)
   - `e8eee45` (docs: record remediation commit and clean handoff section)
   - `c4128da` (test: add deterministic barrier to audit race test and clean handoff links)
-- CI Evidence: GitHub Actions push run [`44994675307`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44994675307)
-  passed for both `film` and `compose` jobs.
-- No BLOCK or accepted CONTAIN exception remains in local review. G2 owner
+  - `bb563a7` (docs: enumerate PR #9 commits in tasks handoff)
+- No BLOCK or accepted CONTAIN exception remains in review. G2 owner
   acceptance and provider-specific G3 obligations remain external.
 
 ### Review result and deferred obligations
@@ -80,5 +80,5 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 Read-only diff/caller/test review found no BLOCK or accepted CONTAIN exception. Queue
 delivery is not provider submission or billing evidence. `AT-P02-11`, `AT-P02-18` and
 `AT-P02-20` remain explicitly partial until G3/provider and benchmark work. CI evidence
-is verified on PR #9 (run 44994675307); owner sign-off is external. Final status cannot exceed
+is verified on PR #9; owner sign-off is external. Final status cannot exceed
 `IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` without owner acceptance.

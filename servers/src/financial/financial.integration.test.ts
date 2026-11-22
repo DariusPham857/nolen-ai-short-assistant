@@ -130,19 +130,20 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     const f = await fixture('100', '25');
     const successor = randomUUID();
     let unblockMutation!: () => void;
-    const mutationLocked = new Promise<void>(resolve => {
-      void pgClient.begin(async tx => {
-        await tx`SELECT id FROM films WHERE id=${f.filmId} FOR UPDATE`;
-        resolve();
-        await new Promise<void>(res => { unblockMutation = res; });
-        await tx`INSERT INTO story_revisions(id,film_id,parent_id,revision_no,state,content,content_hash) VALUES(${successor},${f.filmId},${f.storyRevisionId},2,'DRAFT','{}'::jsonb,'successor')`;
-        await tx`UPDATE films SET active_story_revision_id=${successor} WHERE id=${f.filmId}`;
-      });
+    let resolveLocked!: () => void;
+    const mutationLocked = new Promise<void>(resolve => { resolveLocked = resolve; });
+    const mutationPromise = pgClient.begin(async tx => {
+      await tx`SELECT id FROM films WHERE id=${f.filmId} FOR UPDATE`;
+      resolveLocked();
+      await new Promise<void>(res => { unblockMutation = res; });
+      await tx`INSERT INTO story_revisions(id,film_id,parent_id,revision_no,state,content,content_hash) VALUES(${successor},${f.filmId},${f.storyRevisionId},2,'DRAFT','{}'::jsonb,'successor')`;
+      await tx`UPDATE films SET active_story_revision_id=${successor} WHERE id=${f.filmId}`;
     });
     await mutationLocked;
     const admissionPromise = request(`/api/films/${f.filmId}/attempts`, 'POST', command(f));
     await new Promise(r => setTimeout(r, 100));
     unblockMutation();
+    await mutationPromise;
     const response = await admissionPromise;
     expect(response.status).toBe(409);
     expect((await response.json() as { error: { code: string } }).error.code).toBe('CURRENT_APPROVAL_REQUIRED');
@@ -153,19 +154,9 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     const f = await fixture('100', '25');
     const admitted = attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`, 'POST', command(f))).json());
     const reconcileBody = { billingStatus: 'FINAL', realizedChargeUsdMicros: '20', pendingLiabilityUsdMicros: '0', evidenceRef: 'concurrent-settle', expectedVersion: 0 };
-    let unblockSettlement!: () => void;
-    const settlementCommitted = new Promise<void>(resolve => {
-      unblockSettlement = () => {
-        void (async () => {
-          const res = await request(`/api/attempts/${admitted.attemptId}/reconcile`, 'POST', reconcileBody);
-          expect(res.status).toBe(200);
-          resolve();
-        })();
-      };
-    });
     const auditResult = await auditFinancialProjection(f.filmId, async () => {
-      unblockSettlement();
-      await settlementCommitted;
+      const res = await request(`/api/attempts/${admitted.attemptId}/reconcile`, 'POST', reconcileBody);
+      expect(res.status).toBe(200);
     });
     expect(auditResult.matches).toBe(true);
     expect(auditResult.stored).toMatchObject({ actualSpentUsdMicros: '0', reservedOpenUsdMicros: '25', pendingLiabilityUsdMicros: '0' });
