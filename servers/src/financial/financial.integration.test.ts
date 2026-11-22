@@ -143,7 +143,7 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       await tx`UPDATE films SET active_story_revision_id=${successor} WHERE id=${f.filmId}`;
     });
     try {
-      await mutationLocked;
+      await Promise.race([mutationLocked, mutationPromise]);
       let admissionSettled = false;
       const admissionPromise = request(`/api/films/${f.filmId}/attempts`, 'POST', command(f))
         .finally(() => { admissionSettled = true; });
