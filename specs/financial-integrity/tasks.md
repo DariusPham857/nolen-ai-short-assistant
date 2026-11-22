@@ -66,6 +66,10 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 
 - Branch `fix/fi-001-race-and-audit` is branched directly from `origin/main` at `b2b16ff`.
 - PR: [PR #9](https://github.com/DariusPham857/nolen-ai-short-assistant/pull/9).
+- Commits:
+  - `dd0c2ad` (fix: synchronize admission with story lock and repeatable-read audit)
+  - `e8eee45` (docs: record remediation commit and clean handoff section)
+  - `c4128da` (test: add deterministic barrier to audit race test and clean handoff links)
 - CI Evidence: GitHub Actions push run [`44994675307`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44994675307)
   passed for both `film` and `compose` jobs.
 - No BLOCK or accepted CONTAIN exception remains in local review. G2 owner
