@@ -126,6 +126,46 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     expect(await auditFinancialProjection(f.filmId)).toMatchObject({matches:false});
   });
 
+  it('blocks attempt admission from committing on a superseded StoryRevision during concurrent mutation', async () => {
+    const f = await fixture('100', '25');
+    const successor = randomUUID();
+    let unblockMutation!: () => void;
+    let resolveLocked!: () => void;
+    const mutationLocked = new Promise<void>(resolve => { resolveLocked = resolve; });
+    const mutationPromise = pgClient.begin(async tx => {
+      await tx`SELECT id FROM films WHERE id=${f.filmId} FOR UPDATE`;
+      resolveLocked();
+      await new Promise<void>(res => { unblockMutation = res; });
+      await tx`INSERT INTO story_revisions(id,film_id,parent_id,revision_no,state,content,content_hash) VALUES(${successor},${f.filmId},${f.storyRevisionId},2,'DRAFT','{}'::jsonb,'successor')`;
+      await tx`UPDATE films SET active_story_revision_id=${successor} WHERE id=${f.filmId}`;
+    });
+    await mutationLocked;
+    const admissionPromise = request(`/api/films/${f.filmId}/attempts`, 'POST', command(f));
+    await new Promise(r => setTimeout(r, 100));
+    unblockMutation();
+    await mutationPromise;
+    const response = await admissionPromise;
+    expect(response.status).toBe(409);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe('CURRENT_APPROVAL_REQUIRED');
+    expect(await pgClient`SELECT * FROM attempts WHERE film_id=${f.filmId}`).toHaveLength(0);
+  });
+
+  it('guarantees consistent audit snapshot without false drift during concurrent settlement', async () => {
+    const f = await fixture('100', '25');
+    const admitted = attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`, 'POST', command(f))).json());
+    const reconcileBody = { billingStatus: 'FINAL', realizedChargeUsdMicros: '20', pendingLiabilityUsdMicros: '0', evidenceRef: 'concurrent-settle', expectedVersion: 0 };
+    const auditResult = await auditFinancialProjection(f.filmId, async () => {
+      const res = await request(`/api/attempts/${admitted.attemptId}/reconcile`, 'POST', reconcileBody);
+      expect(res.status).toBe(200);
+    });
+    expect(auditResult.matches).toBe(true);
+    expect(auditResult.stored).toMatchObject({ actualSpentUsdMicros: '0', reservedOpenUsdMicros: '25', pendingLiabilityUsdMicros: '0' });
+    expect(auditResult.expected).toMatchObject({ actualSpentUsdMicros: '0', reservedOpenUsdMicros: '25', pendingLiabilityUsdMicros: '0' });
+    const finalAudit = await auditFinancialProjection(f.filmId);
+    expect(finalAudit.matches).toBe(true);
+    expect(finalAudit.stored).toMatchObject({ actualSpentUsdMicros: '20', reservedOpenUsdMicros: '0', pendingLiabilityUsdMicros: '0' });
+  });
+
   it('enforces append-only audit and shared security boundary',async()=>{
     const f=await fixture();
     await expect(pgClient`UPDATE budget_limit_events SET reason='tampered' WHERE film_id=${f.filmId}`).rejects.toThrow('FI_APPEND_ONLY');

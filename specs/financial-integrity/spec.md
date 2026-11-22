@@ -45,6 +45,11 @@ the Financial Core only; it does not submit to a paid provider or claim G3.
 - [DECIDED] `dispatch_outbox.attempt_id` and worker claims are durable correctness
   boundaries. `singletonKey` is only an optimization. A duplicate queue message cannot
   create Attempt, reservation, ledger or a second submission claim.
+- [DECIDED] Global transaction lock ordering: `film_budget_accounts` -> `films` -> `attempt_financial_state`.
+  Attempt admission locks both the budget account and the active Film row (`FOR UPDATE OF f`)
+  to ensure an admission cannot commit on a superseded StoryRevision under concurrent mutation.
+- [DECIDED] Financial projection audit runs under `REPEATABLE READ READ ONLY` snapshot isolation,
+  preventing false drift reports from concurrent settlement commits without altering stored state.
 - [DECIDED] Verified against pinned `pg-boss@10.4.2`: a job ID is enqueue evidence; `null` requires
   independent queue evidence before `DELIVERED`; throw/timeout records an unknown
   enqueue outcome. Crash recovery reuses the existing outbox intent.

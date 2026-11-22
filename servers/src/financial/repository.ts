@@ -126,7 +126,8 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
         AND sv.rule_set_version=sa.evidence->>'ruleSetVersion'
       WHERE f.id=${filmId} AND f.operator_id=${operatorId} AND sr.id=${input.storyRevisionId} AND sr.state='APPROVED'
         AND sa.evidence->>'storyRevisionId'=sr.id::text AND sa.evidence->>'contentHash'=sr.content_hash
-        AND sa.evidence->>'ruleSetVersion'=${RULESET}`;
+        AND sa.evidence->>'ruleSetVersion'=${RULESET}
+      FOR UPDATE OF f`;
     if(!story)throw new ApiFailure(409,'CURRENT_APPROVAL_REQUIRED','Attempt requires the active StoryRevision with current approval evidence');
     if(['IMAGE','VIDEO'].includes(input.kind) && !input.shotRevisionId)throw new ApiFailure(422,'SHOT_REVISION_REQUIRED','Image and video attempts require a ShotRevision');
     if(input.shotRevisionId){
@@ -206,16 +207,19 @@ export async function readLedger(filmId:string,operatorId:string){return pgClien
 export async function readSummary(filmId:string,operatorId:string){return readBudget(filmId,operatorId);}
 
 /** Compare immutable event/attempt sums with the locked Film projection without repairing drift. */
-export async function auditFinancialProjection(filmId:string){
-  const [account]=await pgClient<{actual_spent_usd_micros:string;reserved_open_usd_micros:string;pending_liability_usd_micros:string}[]>`SELECT actual_spent_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${filmId}`;
-  if(!account)throw new ApiFailure(404,'FILM_NOT_FOUND','Film not found');
-  const [events]=await pgClient<{actual:string;reserved:string}[]>`SELECT
-    COALESCE(sum(CASE WHEN event_type IN ('CHARGE_POSTED','CHARGE_CORRECTED') THEN amount_usd_micros ELSE 0 END),0)::text AS actual,
-    COALESCE(sum(CASE WHEN event_type='RESERVATION_CREATED' THEN amount_usd_micros WHEN event_type='RESERVATION_RELEASED' THEN -amount_usd_micros WHEN event_type='RESERVATION_ADJUSTED' THEN amount_usd_micros ELSE 0 END),0)::text AS reserved
-    FROM cost_ledger_events WHERE film_id=${filmId}`;
-  const [attempts]=await pgClient<{pending:string}[]>`SELECT COALESCE(sum(fs.pending_liability_usd_micros),0)::text AS pending FROM attempt_financial_state fs JOIN attempts a ON a.id=fs.attempt_id WHERE a.film_id=${filmId}`;
-  const expected={actualSpentUsdMicros:events.actual,reservedOpenUsdMicros:events.reserved,pendingLiabilityUsdMicros:attempts.pending};
-  const stored={actualSpentUsdMicros:String(account.actual_spent_usd_micros),reservedOpenUsdMicros:String(account.reserved_open_usd_micros),pendingLiabilityUsdMicros:String(account.pending_liability_usd_micros)};
-  return {filmId,matches:expected.actualSpentUsdMicros===stored.actualSpentUsdMicros&&expected.reservedOpenUsdMicros===stored.reservedOpenUsdMicros&&expected.pendingLiabilityUsdMicros===stored.pendingLiabilityUsdMicros,expected,stored};
+export async function auditFinancialProjection(filmId:string, onAfterAccountRead?: () => Promise<void> | void){
+  return pgClient.begin('isolation level repeatable read read only', async tx => {
+    const [account]=await tx<{actual_spent_usd_micros:string;reserved_open_usd_micros:string;pending_liability_usd_micros:string}[]>`SELECT actual_spent_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${filmId}`;
+    if(!account)throw new ApiFailure(404,'FILM_NOT_FOUND','Film not found');
+    if(onAfterAccountRead)await onAfterAccountRead();
+    const [events]=await tx<{actual:string;reserved:string}[]>`SELECT
+      COALESCE(sum(CASE WHEN event_type IN ('CHARGE_POSTED','CHARGE_CORRECTED') THEN amount_usd_micros ELSE 0 END),0)::text AS actual,
+      COALESCE(sum(CASE WHEN event_type='RESERVATION_CREATED' THEN amount_usd_micros WHEN event_type='RESERVATION_RELEASED' THEN -amount_usd_micros WHEN event_type='RESERVATION_ADJUSTED' THEN amount_usd_micros ELSE 0 END),0)::text AS reserved
+      FROM cost_ledger_events WHERE film_id=${filmId}`;
+    const [attempts]=await tx<{pending:string}[]>`SELECT COALESCE(sum(fs.pending_liability_usd_micros),0)::text AS pending FROM attempt_financial_state fs JOIN attempts a ON a.id=fs.attempt_id WHERE a.film_id=${filmId}`;
+    const expected={actualSpentUsdMicros:events.actual,reservedOpenUsdMicros:events.reserved,pendingLiabilityUsdMicros:attempts.pending};
+    const stored={actualSpentUsdMicros:String(account.actual_spent_usd_micros),reservedOpenUsdMicros:String(account.reserved_open_usd_micros),pendingLiabilityUsdMicros:String(account.pending_liability_usd_micros)};
+    return {filmId,matches:expected.actualSpentUsdMicros===stored.actualSpentUsdMicros&&expected.reservedOpenUsdMicros===stored.reservedOpenUsdMicros&&expected.pendingLiabilityUsdMicros===stored.pendingLiabilityUsdMicros,expected,stored};
+  });
 }
 
