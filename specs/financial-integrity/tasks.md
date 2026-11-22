@@ -59,19 +59,21 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 - PostgreSQL 16 interleaving tests in `financial.integration.test.ts` (verified via CI PostgreSQL 16 service container):
   1. `blocks attempt admission from committing on a superseded StoryRevision during concurrent mutation`: PASS.
   2. `guarantees consistent audit snapshot without false drift during concurrent settlement`: PASS.
-- CI pipeline: PR #9 GitHub Actions push runs [`44994675307`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44994675307)
-  (passed) and [`44996535160`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44996535160)
-  verify PostgreSQL 16 integration, unit, lint, typecheck, build, and Compose smoke.
+- CI pipeline: PR #9 GitHub Actions final-HEAD runs [`44997596244`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44997596244)
+  (push) and [`44997602124`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44997602124)
+  (pull_request) verify PostgreSQL 16 integration, unit, lint, typecheck, build, and Compose smoke on final HEAD `3c59025`.
 
 ### Delivery status
 
-- Branch `fix/fi-001-race-and-audit` is branched directly from `origin/main` at `b2b16ff`.
-- PR: [PR #9](https://github.com/DariusPham857/nolen-ai-short-assistant/pull/9).
-- Commits:
+- PR #9 ([PR #9](https://github.com/DariusPham857/nolen-ai-short-assistant/pull/9)) merged into `main` (merge commit `865da9a`) with final HEAD `3c59025`:
   - `dd0c2ad` (fix: synchronize admission with story lock and repeatable-read audit)
   - `e8eee45` (docs: record remediation commit and clean handoff section)
   - `c4128da` (test: add deterministic barrier to audit race test and clean handoff links)
   - `bb563a7` (docs: enumerate PR #9 commits in tasks handoff)
+  - `3c59025` (test: await mutation promise and streamline audit settlement hook)
+- Follow-up branch `fix/fi-001-admission-lock-barrier`:
+  - Deterministic lock waiting barrier via `pg_stat_activity` / `pg_blocking_pids` in `financial.integration.test.ts` preventing false-pass regression.
+  - Updated tasks.md evidence links to reflect PR #9 final-HEAD runs `44997596244` and `44997602124`.
 - No BLOCK or accepted CONTAIN exception remains in review. G2 owner
   acceptance and provider-specific G3 obligations remain external.
 
@@ -80,5 +82,5 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 Read-only diff/caller/test review found no BLOCK or accepted CONTAIN exception. Queue
 delivery is not provider submission or billing evidence. `AT-P02-11`, `AT-P02-18` and
 `AT-P02-20` remain explicitly partial until G3/provider and benchmark work. CI evidence
-is verified on PR #9; owner sign-off is external. Final status cannot exceed
+is verified on PR #9 final HEAD; owner sign-off is external. Final status cannot exceed
 `IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` without owner acceptance.
