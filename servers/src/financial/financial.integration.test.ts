@@ -153,14 +153,26 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     const f = await fixture('100', '25');
     const admitted = attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`, 'POST', command(f))).json());
     const reconcileBody = { billingStatus: 'FINAL', realizedChargeUsdMicros: '20', pendingLiabilityUsdMicros: '0', evidenceRef: 'concurrent-settle', expectedVersion: 0 };
-    const [auditBefore, settleRes, auditAfter] = await Promise.all([
-      auditFinancialProjection(f.filmId),
-      request(`/api/attempts/${admitted.attemptId}/reconcile`, 'POST', reconcileBody),
-      auditFinancialProjection(f.filmId),
-    ]);
-    expect(settleRes.status).toBe(200);
-    expect(auditBefore.matches).toBe(true);
-    expect(auditAfter.matches).toBe(true);
+    let unblockSettlement!: () => void;
+    const settlementCommitted = new Promise<void>(resolve => {
+      unblockSettlement = () => {
+        void (async () => {
+          const res = await request(`/api/attempts/${admitted.attemptId}/reconcile`, 'POST', reconcileBody);
+          expect(res.status).toBe(200);
+          resolve();
+        })();
+      };
+    });
+    const auditResult = await auditFinancialProjection(f.filmId, async () => {
+      unblockSettlement();
+      await settlementCommitted;
+    });
+    expect(auditResult.matches).toBe(true);
+    expect(auditResult.stored).toMatchObject({ actualSpentUsdMicros: '0', reservedOpenUsdMicros: '25', pendingLiabilityUsdMicros: '0' });
+    expect(auditResult.expected).toMatchObject({ actualSpentUsdMicros: '0', reservedOpenUsdMicros: '25', pendingLiabilityUsdMicros: '0' });
+    const finalAudit = await auditFinancialProjection(f.filmId);
+    expect(finalAudit.matches).toBe(true);
+    expect(finalAudit.stored).toMatchObject({ actualSpentUsdMicros: '20', reservedOpenUsdMicros: '0', pendingLiabilityUsdMicros: '0' });
   });
 
   it('enforces append-only audit and shared security boundary',async()=>{

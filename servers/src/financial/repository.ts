@@ -207,10 +207,11 @@ export async function readLedger(filmId:string,operatorId:string){return pgClien
 export async function readSummary(filmId:string,operatorId:string){return readBudget(filmId,operatorId);}
 
 /** Compare immutable event/attempt sums with the locked Film projection without repairing drift. */
-export async function auditFinancialProjection(filmId:string){
+export async function auditFinancialProjection(filmId:string, onAfterAccountRead?: () => Promise<void> | void){
   return pgClient.begin('isolation level repeatable read read only', async tx => {
     const [account]=await tx<{actual_spent_usd_micros:string;reserved_open_usd_micros:string;pending_liability_usd_micros:string}[]>`SELECT actual_spent_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${filmId}`;
     if(!account)throw new ApiFailure(404,'FILM_NOT_FOUND','Film not found');
+    if(onAfterAccountRead)await onAfterAccountRead();
     const [events]=await tx<{actual:string;reserved:string}[]>`SELECT
       COALESCE(sum(CASE WHEN event_type IN ('CHARGE_POSTED','CHARGE_CORRECTED') THEN amount_usd_micros ELSE 0 END),0)::text AS actual,
       COALESCE(sum(CASE WHEN event_type='RESERVATION_CREATED' THEN amount_usd_micros WHEN event_type='RESERVATION_RELEASED' THEN -amount_usd_micros WHEN event_type='RESERVATION_ADJUSTED' THEN amount_usd_micros ELSE 0 END),0)::text AS reserved

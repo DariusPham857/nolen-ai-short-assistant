@@ -64,10 +64,10 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 
 ### Delivery status
 
-- Branch `fix/fi-001-race-and-audit` is branched directly from `origin/main` at `b2b16ff`;
-  remediation commit `dd0c2ad` is pushed.
-- PR creation link:
-  <https://github.com/DariusPham857/nolen-ai-short-assistant/pull/new/fix/fi-001-race-and-audit>.
+- Branch `fix/fi-001-race-and-audit` is branched directly from `origin/main` at `b2b16ff`.
+- PR: [PR #9](https://github.com/DariusPham857/nolen-ai-short-assistant/pull/9).
+- CI Evidence: GitHub Actions push run [`44994675307`](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/44994675307)
+  passed for both `film` and `compose` jobs.
 - No BLOCK or accepted CONTAIN exception remains in local review. G2 owner
   acceptance and provider-specific G3 obligations remain external.
 
@@ -76,7 +76,5 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 Read-only diff/caller/test review found no BLOCK or accepted CONTAIN exception. Queue
 delivery is not provider submission or billing evidence. `AT-P02-11`, `AT-P02-18` and
 `AT-P02-20` remain explicitly partial until G3/provider and benchmark work. CI evidence
-will be linked from the PR; owner sign-off is external. Final status cannot exceed
-`IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` without owner acceptance.
-will be linked from the PR; owner sign-off is external. Final status cannot exceed
+is verified on PR #9 (run 44994675307); owner sign-off is external. Final status cannot exceed
 `IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` without owner acceptance.
