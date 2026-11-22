@@ -11,7 +11,7 @@ import { auditFinancialProjection } from './repository.js';
 
 const token='financial-test-operator-token-at-least-32-bytes';
 const api=createFinancialApi();let cookie='';
-function request(route:string,method='GET',body?:unknown,key=randomUUID(),headers:Record<string,string>={}){
+async function request(route:string,method='GET',body?:unknown,key=randomUUID(),headers:Record<string,string>={}): Promise<Response> {
   return api.request(`http://127.0.0.1:3000${route}`,{method,headers:{Origin:'http://127.0.0.1:3000',Cookie:cookie,'Content-Type':'application/json','Idempotency-Key':key,...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
 }
 async function fixture(budget='100',rate='25',rateType:'FIXED_PER_REQUEST'|'PER_SECOND'='FIXED_PER_REQUEST',approved=true,ruleSetVersion='story-approval-2',approvalDependency='fixture-dependency'){
@@ -129,25 +129,52 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
   it('blocks attempt admission from committing on a superseded StoryRevision during concurrent mutation', async () => {
     const f = await fixture('100', '25');
     const successor = randomUUID();
-    let unblockMutation!: () => void;
+    let unblockMutation: (() => void) | undefined;
     let resolveLocked!: () => void;
+    let mutationPid = 0;
     const mutationLocked = new Promise<void>(resolve => { resolveLocked = resolve; });
     const mutationPromise = pgClient.begin(async tx => {
+      const [{ pid }] = await tx<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      mutationPid = pid;
       await tx`SELECT id FROM films WHERE id=${f.filmId} FOR UPDATE`;
       resolveLocked();
       await new Promise<void>(res => { unblockMutation = res; });
       await tx`INSERT INTO story_revisions(id,film_id,parent_id,revision_no,state,content,content_hash) VALUES(${successor},${f.filmId},${f.storyRevisionId},2,'DRAFT','{}'::jsonb,'successor')`;
       await tx`UPDATE films SET active_story_revision_id=${successor} WHERE id=${f.filmId}`;
     });
-    await mutationLocked;
-    const admissionPromise = request(`/api/films/${f.filmId}/attempts`, 'POST', command(f));
-    await new Promise(r => setTimeout(r, 100));
-    unblockMutation();
-    await mutationPromise;
-    const response = await admissionPromise;
-    expect(response.status).toBe(409);
-    expect((await response.json() as { error: { code: string } }).error.code).toBe('CURRENT_APPROVAL_REQUIRED');
-    expect(await pgClient`SELECT * FROM attempts WHERE film_id=${f.filmId}`).toHaveLength(0);
+    try {
+      await Promise.race([mutationLocked, mutationPromise]);
+      let admissionSettled = false;
+      const admissionPromise = request(`/api/films/${f.filmId}/attempts`, 'POST', command(f))
+        .finally(() => { admissionSettled = true; });
+
+      let isBlocked = false;
+      for (let i = 0; i < 200; i++) {
+        if (admissionSettled) {
+          throw new Error('Admission completed before being blocked on the film row lock');
+        }
+        const blockers = await pgClient<{ pid: number }[]>`
+          SELECT pid FROM pg_stat_activity WHERE ${mutationPid} = ANY(pg_blocking_pids(pid))
+        `;
+        if (blockers.length > 0) {
+          isBlocked = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 20));
+      }
+      expect(isBlocked).toBe(true);
+      expect(admissionSettled).toBe(false);
+
+      unblockMutation?.();
+      await mutationPromise;
+      const response = await admissionPromise;
+      expect(response.status).toBe(409);
+      expect((await response.json() as { error: { code: string } }).error.code).toBe('CURRENT_APPROVAL_REQUIRED');
+      expect(await pgClient`SELECT * FROM attempts WHERE film_id=${f.filmId}`).toHaveLength(0);
+    } finally {
+      unblockMutation?.();
+      await mutationPromise.catch(() => {});
+    }
   });
 
   it('guarantees consistent audit snapshot without false drift during concurrent settlement', async () => {
