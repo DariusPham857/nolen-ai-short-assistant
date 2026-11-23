@@ -8,5 +8,6 @@ Source: [ENG-DEC-001](../docs/development/ENG-DEC-001.md).
 - [Story Planning & Approval](story-planning/spec.md) and [implementation evidence](story-planning/tasks.md)
 - [Financial Integrity & Atomic Budget Admission](financial-integrity/spec.md) and [implementation evidence](financial-integrity/tasks.md)
 - [Keyframe Approval Gate & Asset Lifecycle](keyframe-approval/spec.md) and [implementation tasks](keyframe-approval/tasks.md)
+- [Provider Dispatch & Financial Settlement](provider-dispatch/spec.md) and [implementation tasks](provider-dispatch/tasks.md)
 
 Commands and gate limitations: [verification](../docs/development/verification.md).
