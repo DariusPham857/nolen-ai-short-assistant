@@ -73,6 +73,7 @@ Source: [spec](spec.md)
     - Worker persists `SUBMITTED` only via CAS matching `WHERE attempt_id = ... AND state = 'SUBMITTING' AND claim_token = ...`.
     - If sweeper expired lease and marked `SUBMISSION_UNCERTAIN` while HTTP was in flight, CAS safely fails and passes `providerJobId` directly to `reconcileUncertainDispatch`.
     - Reconciliation resets pending liability and synchronizes `attempts` and `outbound_dispatches` without state divergence.
+    - Reverse race: Sweeper CAS ensures `recoverStaleSubmissions` and `markSubmissionUncertain` check `WHERE attempt_id = ... AND state = 'SUBMITTING' AND claim_token = ... AND claimed_at = ...`. If worker finishes and succeeds CAS first, sweeper CAS fails with `{ state: null, skipped: true }`, completely preventing revert to `SUBMISSION_UNCERTAIN` and avoiding spurious pending liability holds.
 
 ## Handoff
 Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).

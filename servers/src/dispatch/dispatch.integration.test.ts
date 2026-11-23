@@ -213,6 +213,78 @@ describe.runIf(isLiveDb)('Dispatch & Recovery Integration Tests (PostgreSQL 16) 
     expect(fin.pending_liability_usd_micros).toBe('0');
   });
 
+  it('Reverse CAS Race: stale sweeper snapshot attempting markSubmissionUncertain fails CAS and does not overwrite worker SUBMITTED state', async () => {
+    const { filmId, attemptId } = await seedAttemptFixture('950000');
+    const claimToken = randomUUID();
+
+    // 1. Worker claimed row in SUBMITTING state
+    await pgClient`INSERT INTO outbound_dispatches(attempt_id, state, claim_token, claimed_at)
+      VALUES(${attemptId}, 'SUBMITTING', ${claimToken}, now() - interval '45 seconds')`;
+
+    // 2. Sweeper reads stale snapshot while row is in SUBMITTING
+    const [staleSnapshot] = await pgClient<{
+      attempt_id: string;
+      claim_token: string;
+      claimed_at: Date;
+    }[]>`
+      SELECT attempt_id, claim_token, claimed_at FROM outbound_dispatches WHERE attempt_id = ${attemptId}
+    `;
+    expect(staleSnapshot).toBeDefined();
+
+    // 3. Worker submit finishes and worker CAS succeeds: row becomes SUBMITTED with provider_job_id
+    const [workerUpdated] = await pgClient<{ attempt_id: string }[]>`
+      UPDATE outbound_dispatches
+      SET state = 'SUBMITTED',
+          provider_job_id = 'job-fast-worker-789',
+          updated_at = now()
+      WHERE attempt_id = ${attemptId}
+        AND state = 'SUBMITTING'
+        AND claim_token = ${claimToken}
+      RETURNING attempt_id
+    `;
+    expect(workerUpdated).toBeDefined();
+    await pgClient`UPDATE attempts SET state = 'SUBMITTED' WHERE id = ${attemptId}`;
+
+    // 4. Sweeper awakens and attempts markSubmissionUncertain using the stale snapshot
+    const sweepResult = await markSubmissionUncertain(
+      attemptId,
+      'Sweeper expired stale lease after worker already succeeded',
+      {
+        claimToken: staleSnapshot.claim_token,
+        claimedAt: staleSnapshot.claimed_at,
+        expectedState: 'SUBMITTING',
+      },
+    );
+
+    // 5. Verify CAS missed: skipped is true and state is null
+    expect(sweepResult.skipped).toBe(true);
+    expect(sweepResult.state).toBeNull();
+
+    // 6. Verify database state is untouched by the sweeper:
+    // outbound_dispatches MUST still be SUBMITTED with the worker's provider_job_id
+    const [dispatch] = await pgClient<{ state: string; provider_job_id: string }[]>`
+      SELECT state, provider_job_id FROM outbound_dispatches WHERE attempt_id = ${attemptId}
+    `;
+    expect(dispatch.state).toBe('SUBMITTED');
+    expect(dispatch.provider_job_id).toBe('job-fast-worker-789');
+
+    // attempts table MUST NOT be reverted to SUBMISSION_UNCERTAIN
+    const [att] = await pgClient<{ state: string }[]>`SELECT state FROM attempts WHERE id = ${attemptId}`;
+    expect(att.state).toBe('SUBMITTED');
+
+    // attempt_financial_state MUST NOT have pending_liability held (should remain 0)
+    const [fin] = await pgClient<{ pending_liability_usd_micros: string }[]>`
+      SELECT pending_liability_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId}
+    `;
+    expect(fin.pending_liability_usd_micros).toBe('0');
+
+    // film_budget_accounts MUST NOT have pending_liability held
+    const [budget] = await pgClient<{ pending_liability_usd_micros: string }[]>`
+      SELECT pending_liability_usd_micros FROM film_budget_accounts WHERE film_id = ${filmId}
+    `;
+    expect(budget.pending_liability_usd_micros).toBe('0');
+  });
+
   it('BLOCK 4: outbox relay exhaustion transitions row to EXHAUSTED and resetExhaustedOutbox unfreezes it', async () => {
     // Clear outbox to ensure hermetic lease
     await pgClient`DELETE FROM dispatch_outbox`;

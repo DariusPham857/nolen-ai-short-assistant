@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ProviderAdapter } from '../providers/index.js';
 import type { GenerationRequest } from '@nolen/contracts';
-import { dispatchAttempt } from './service.js';
+import { dispatchAttempt, markSubmissionUncertain } from './service.js';
+import { pgClient } from '../db/index.js';
 
 describe('Dispatch Service Contracts & Outcomes (PD-04 / BLOCK 1-3)', () => {
   const mockRequest: GenerationRequest = {
@@ -78,5 +79,63 @@ describe('Dispatch Service Contracts & Outcomes (PD-04 / BLOCK 1-3)', () => {
     ).rejects.toThrow('SIMULATED_CRASH_BEFORE_CLAIM');
 
     expect(submitSpy).not.toHaveBeenCalledWith(expect.objectContaining({ attemptId: 'non-existent' }));
+  });
+
+  it('markSubmissionUncertain returns skipped: true when CAS criteria fails to match any row', async () => {
+    const fakeTx = vi.fn().mockResolvedValue([]);
+    const beginSpy = vi.spyOn(pgClient, 'begin').mockImplementation(async (...args) => {
+      const callback = typeof args[0] === 'function' ? args[0] : args[1];
+      if (typeof callback === 'function') {
+        return (callback as (tx: unknown) => unknown)(fakeTx) as never;
+      }
+      return undefined as never;
+    });
+
+    const result = await markSubmissionUncertain('test-attempt-id', 'Sweeper test', {
+      claimToken: '00000000-0000-0000-0000-000000000000',
+      claimedAt: new Date(),
+      expectedState: 'SUBMITTING',
+    });
+
+    expect(result).toEqual({ state: null, skipped: true });
+    // Verify fakeTx was called for CAS update and immediately aborted without querying attempts or locking budget
+    expect(fakeTx).toHaveBeenCalledTimes(1);
+    beginSpy.mockRestore();
+  });
+
+  it('markSubmissionUncertain updates attempts and financial state only when CAS succeeds', async () => {
+    const fakeTx = vi.fn().mockImplementation((strings: TemplateStringsArray) => {
+      const queryStr = strings.join('');
+      if (queryStr.includes('UPDATE outbound_dispatches')) {
+        return [{ attempt_id: 'test-attempt-id' }];
+      }
+      if (queryStr.includes('SELECT film_id FROM attempts')) {
+        return [{ film_id: 'test-film-id' }];
+      }
+      if (queryStr.includes('SELECT pending_liability_usd_micros, reserved_open_usd_micros FROM film_budget_accounts')) {
+        return [{ pending_liability_usd_micros: '0', reserved_open_usd_micros: '500000' }];
+      }
+      if (queryStr.includes('SELECT reservation_open_usd_micros, pending_liability_usd_micros FROM attempt_financial_state')) {
+        return [{ reservation_open_usd_micros: '500000', pending_liability_usd_micros: '0' }];
+      }
+      return [];
+    });
+
+    const beginSpy = vi.spyOn(pgClient, 'begin').mockImplementation(async (...args) => {
+      const callback = typeof args[0] === 'function' ? args[0] : args[1];
+      if (typeof callback === 'function') {
+        return (callback as (tx: unknown) => unknown)(fakeTx) as never;
+      }
+      return undefined as never;
+    });
+
+    const result = await markSubmissionUncertain('test-attempt-id', 'Sweeper test', {
+      claimToken: '00000000-0000-0000-0000-000000000000',
+      claimedAt: new Date(),
+      expectedState: 'SUBMITTING',
+    });
+
+    expect(result).toEqual({ state: 'SUBMISSION_UNCERTAIN', pendingLiabilityHeld: '500000' });
+    beginSpy.mockRestore();
   });
 });
