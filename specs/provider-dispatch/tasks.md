@@ -78,3 +78,9 @@ Source: [spec](spec.md)
 ## Handoff
 Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
 Record actual check statuses and remaining blockers, never anticipated results.
+
+- **2026-11-23 CI typecheck repair**: Preserved the discriminated `MarkSubmissionUncertainResult` contract and changed the integration assertion to compare the complete success result instead of reading a branch-only property without narrowing.
+  - `pnpm build`: PASS.
+  - `pnpm typecheck`: PASS.
+  - `pnpm --filter @nolen/server test -- src/dispatch/service.test.ts`: PASS (5 tests).
+  - PostgreSQL integration tests were not rerun locally for this assertion-only repair; PR CI remains the publication gate.

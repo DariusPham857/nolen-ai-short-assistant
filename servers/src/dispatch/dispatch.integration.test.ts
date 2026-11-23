@@ -70,8 +70,10 @@ describe.runIf(isLiveDb)('Dispatch & Recovery Integration Tests (PostgreSQL 16) 
 
     // Call markSubmissionUncertain
     const result = await markSubmissionUncertain(attemptId, 'Simulated transport exception');
-    expect(result.state).toBe('SUBMISSION_UNCERTAIN');
-    expect(result.pendingLiabilityHeld).toBe('500000');
+    expect(result).toEqual({
+      state: 'SUBMISSION_UNCERTAIN',
+      pendingLiabilityHeld: '500000',
+    });
 
     // Verify database state: attempt, attempt_financial_state, film_budget_accounts, outbound_dispatches
     const [att] = await pgClient<{ state: string }[]>`SELECT state FROM attempts WHERE id = ${attemptId}`;

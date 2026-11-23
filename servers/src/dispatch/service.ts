@@ -16,11 +16,9 @@ export interface MarkSubmissionUncertainCasCriteria {
   expectedState?: string;
 }
 
-export interface MarkSubmissionUncertainResult {
-  state: 'SUBMISSION_UNCERTAIN' | null;
-  pendingLiabilityHeld?: string;
-  skipped?: boolean;
-}
+export type MarkSubmissionUncertainResult =
+  | { state: 'SUBMISSION_UNCERTAIN'; pendingLiabilityHeld: string; skipped?: false }
+  | { state: null; skipped: true };
 
 export type DispatchOutcome =
   | { outcome: 'ALREADY_CLAIMED'; claimToken: null }
