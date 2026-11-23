@@ -130,9 +130,11 @@ export const dispatchOutbox = pgTable('dispatch_outbox', {
   retryCount: integer('retry_count').notNull().default(0),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  exhaustedAt: timestamp('exhausted_at', { withTimezone: true }),
+  lastError: text('last_error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
-  check('dispatch_outbox_status_valid', sql`${table.status} IN ('PENDING','DELIVERING','DELIVERED')`),
+  check('dispatch_outbox_status_valid', sql`${table.status} IN ('PENDING','DELIVERING','DELIVERED','EXHAUSTED')`),
   check('dispatch_outcome_valid', sql`${table.enqueueOutcome} IN ('NOT_ATTEMPTED','JOB_ID','NULL_UNVERIFIED','UNKNOWN_ENQUEUE_OUTCOME','WORKER_CONFIRMED')`),
   check('dispatch_retry_nonnegative', sql`${table.retryCount} >= 0`),
 ]);

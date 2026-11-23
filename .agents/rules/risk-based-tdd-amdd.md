@@ -1,6 +1,6 @@
 # Risk-Based TDD & Lightweight AMDD — Agent Execution Rule
 
-**Status:** PROPOSED — effective only when owner approves [ENG-DEC-002](../../docs/development/ENG-DEC-002.md).  
+**Status:** ACCEPTED — effective upon owner approval of [ENG-DEC-002](../../docs/development/ENG-DEC-002.md) on 2026-11-23.  
 **Authority:** [ENG-DEC-002](../../docs/development/ENG-DEC-002.md) defines risk tiers and obligations; [SDD-Lite plan/handoff](plan-breakdown-handoff.md) remains the canonical implementation workflow; [exceptions/review](engineering-exceptions.md) remains canonical for BLOCK/CONTAIN decisions.
 
 ## Before writing code

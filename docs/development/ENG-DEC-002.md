@@ -1,12 +1,12 @@
 # ENG-DEC-002 — Risk-Based TDD & Lightweight AMDD
 
-**Status:** PROPOSED — pending owner approval (2026-11-22)  
+**Status:** ACCEPTED — owner approved implementation on 2026-11-23  
 **Type:** Engineering workflow amendment, subordinate to [ENG-DEC-001 — SDD-Lite](ENG-DEC-001.md)  
 **Scope:** New or modified engineering work; G3 Provider Dispatch is the first pilot. No runtime implementation is authorized by this decision alone.
 
 ## 1. Decision and boundaries
 
-[PROPOSED] Improve SDD-Lite through risk-based test-first development and lightweight, just-enough modeling. Keep the existing plan-first workflow, feature specifications, handoff, review, evidence statuses, branch/PR practices and release gates. Do **not** introduce a competing delivery process, new orchestration framework or mandatory sprint cadence.
+[DECIDED] Improve SDD-Lite through risk-based test-first development and lightweight, just-enough modeling. Keep the existing plan-first workflow, feature specifications, handoff, review, evidence statuses, branch/PR practices and release gates. Do **not** introduce a competing delivery process, new orchestration framework or mandatory sprint cadence.
 
 - Product requirements, approved DEC-P01–P09, security/financial invariants and G0–G5 remain unchanged. This document **does not** authorize G3 provider calls, migrations, dependencies, or alterations to G2 financial behavior.
 - Use the [plan/scope/handoff workflow](../../.agents/rules/plan-breakdown-handoff.md) for authorization and task sizing, and the [exceptions/review policy](../../.agents/rules/engineering-exceptions.md) for ALLOW / CONTAIN / BLOCK decisions.
