@@ -8,8 +8,13 @@ import type { ProviderAdapter } from './adapter.js';
 
 export class FakeFalKlingAdapter implements ProviderAdapter {
   readonly kind = 'FAL_KLING' as const;
+  readonly executionMode = 'REPLAY' as const;
+  readonly isFake = true as const;
 
   async submit(request: GenerationRequest): Promise<SubmissionResult> {
+    if (request.executionMode === 'LIVE') {
+      throw new Error('FAKE_TRANSPORT_FORBIDDEN_IN_LIVE: FakeFalKlingAdapter cannot execute in LIVE mode');
+    }
     if (request.kind !== 'VIDEO') {
       throw new Error(`fal.ai Kling adapter only supports VIDEO generation, received ${request.kind}`);
     }
@@ -19,6 +24,8 @@ export class FakeFalKlingAdapter implements ProviderAdapter {
       attemptId: request.attemptId,
       providerJobId,
       state: 'SUBMITTED',
+      executionMode: 'REPLAY',
+      provenance: 'REPLAY_FIXTURE',
       submittedAt: new Date().toISOString(),
       estimatedCompletionSeconds: 30,
     };
@@ -28,6 +35,7 @@ export class FakeFalKlingAdapter implements ProviderAdapter {
     return {
       providerJobId,
       state: 'SUCCEEDED',
+      provenance: 'REPLAY_FIXTURE',
       mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/fal-kling-mock-video.mp4',
       rawResponse: { endpoint: 'fal-ai/kling-video/v3/pro/image-to-video' },
     };

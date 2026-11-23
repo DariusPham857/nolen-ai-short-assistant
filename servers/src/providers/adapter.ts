@@ -4,10 +4,13 @@ import type {
   ProviderStatusUpdate,
   ReconciliationResult,
   ProviderKind,
+  ExecutionMode,
 } from '@nolen/contracts';
 
 export interface ProviderAdapter {
   readonly kind: ProviderKind;
+  readonly executionMode: ExecutionMode;
+  readonly isFake: boolean;
 
   /**
    * Submits a generation request to the provider.

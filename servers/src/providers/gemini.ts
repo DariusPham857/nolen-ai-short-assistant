@@ -8,8 +8,13 @@ import type { ProviderAdapter } from './adapter.js';
 
 export class FakeGeminiAdapter implements ProviderAdapter {
   readonly kind = 'GEMINI' as const;
+  readonly executionMode = 'REPLAY' as const;
+  readonly isFake = true as const;
 
   async submit(request: GenerationRequest): Promise<SubmissionResult> {
+    if (request.executionMode === 'LIVE') {
+      throw new Error('FAKE_TRANSPORT_FORBIDDEN_IN_LIVE: FakeGeminiAdapter cannot execute in LIVE mode');
+    }
     if (request.kind !== 'IMAGE') {
       throw new Error(`Gemini adapter only supports IMAGE generation, received ${request.kind}`);
     }
@@ -19,6 +24,8 @@ export class FakeGeminiAdapter implements ProviderAdapter {
       attemptId: request.attemptId,
       providerJobId,
       state: 'SUBMITTED',
+      executionMode: 'REPLAY',
+      provenance: 'REPLAY_FIXTURE',
       submittedAt: new Date().toISOString(),
       estimatedCompletionSeconds: 5,
     };
@@ -28,6 +35,7 @@ export class FakeGeminiAdapter implements ProviderAdapter {
     return {
       providerJobId,
       state: 'SUCCEEDED',
+      provenance: 'REPLAY_FIXTURE',
       mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/gemini-mock-keyframe.png',
       rawResponse: { model: 'gemini-3.1-flash-image', seed: 42 },
     };
@@ -39,7 +47,7 @@ export class FakeGeminiAdapter implements ProviderAdapter {
         attemptId,
         providerJobId,
         outcome: 'CONFIRMED_SUCCEEDED',
-        evidence: `Fake Gemini reconciliation confirmed successful generation for job ${providerJobId}`,
+        evidence: `Fake Gemini reconciliation confirmed fixture completion for job ${providerJobId}`,
       };
     }
     return {

@@ -5,8 +5,9 @@ import type { GenerationRequest, SubmissionResult, ReconciliationResult } from '
 import { assertSafeRemoteUrl } from '../lib/ssrf.js';
 
 export interface DispatchExecutionOptions {
-  simulateCrashAt?: 'BEFORE_CLAIM' | 'DURING_HTTP' | 'AFTER_SUBMIT';
+  simulateCrashAt?: 'BEFORE_CLAIM' | 'DURING_HTTP_RAW_CRASH' | 'AFTER_SUBMIT';
   operatorId?: string;
+  staleLeaseTimeoutMs?: number;
 }
 
 export type DispatchOutcome =
@@ -20,32 +21,73 @@ export type DispatchOutcome =
  * Marks an in-flight dispatch as SUBMISSION_UNCERTAIN following worker crash,
  * network drop, or ambiguous 5xx/429 response.
  *
- * Invariant (G3-A): Financial hold is preserved. No money is released,
- * and pending_liability is set to cover the open reservation.
+ * Invariant (G3-A / DEC-P02):
+ * - Lock hierarchy: film_budget_accounts FOR UPDATE must precede attempt_financial_state FOR UPDATE.
+ * - Film ID is read from `attempts` (not attempt_financial_state).
+ * - Financial hold is preserved: no money is released, and pending_liability is set
+ *   on both attempt_financial_state and film_budget_accounts to cover the open reservation.
  */
 export async function markSubmissionUncertain(
   attemptId: string,
   reason: string,
 ): Promise<{ state: 'SUBMISSION_UNCERTAIN'; pendingLiabilityHeld: string }> {
   return pgClient.begin('isolation level read committed', async tx => {
-    // Lock attempt financial state
-    const [fin] = await tx<{
+    // 1. Look up film_id from attempts
+    const [att] = await tx<{
       film_id: string;
+    }[]>`SELECT film_id FROM attempts WHERE id = ${attemptId}`;
+
+    if (!att) {
+      throw new Error(`Attempt ${attemptId} not found`);
+    }
+    const filmId = att.film_id;
+
+    // 2. Lock film_budget_accounts FIRST (hierarchical lock ordering DEC-P02)
+    const [budget] = await tx<{
+      pending_liability_usd_micros: string;
+      reserved_open_usd_micros: string;
+    }[]>`SELECT pending_liability_usd_micros, reserved_open_usd_micros FROM film_budget_accounts WHERE film_id = ${filmId} FOR UPDATE`;
+
+    if (!budget) {
+      throw new Error(`Budget account for film ${filmId} not found`);
+    }
+
+    // 3. Lock attempt_financial_state SECOND
+    const [fin] = await tx<{
       reservation_open_usd_micros: string;
-    }[]>`SELECT film_id, reservation_open_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId} FOR UPDATE`;
+      pending_liability_usd_micros: string;
+    }[]>`SELECT reservation_open_usd_micros, pending_liability_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId} FOR UPDATE`;
 
     if (!fin) {
       throw new Error(`Attempt ${attemptId} not found in financial state`);
     }
 
-    // Set pending liability equal to open reservation to guarantee no capacity leak
-    const openReservation = fin.reservation_open_usd_micros;
+    const openReservation = BigInt(fin.reservation_open_usd_micros);
+    const priorAttemptPending = BigInt(fin.pending_liability_usd_micros);
+    const deltaPending = openReservation - priorAttemptPending;
+
+    // 4. Update attempt_financial_state: pending liability equal to open reservation
     await tx`UPDATE attempt_financial_state
-      SET pending_liability_usd_micros = ${openReservation},
+      SET pending_liability_usd_micros = ${openReservation.toString()},
           updated_at = now()
       WHERE attempt_id = ${attemptId}`;
 
-    // Update dispatch state to SUBMISSION_UNCERTAIN
+    // 5. Update film_budget_accounts: adjust pending liability by deltaPending
+    if (deltaPending !== 0n) {
+      const newFilmPending = BigInt(budget.pending_liability_usd_micros) + deltaPending;
+      await tx`UPDATE film_budget_accounts
+        SET pending_liability_usd_micros = ${newFilmPending.toString()},
+            version = version + 1,
+            updated_at = now()
+        WHERE film_id = ${filmId}`;
+    }
+
+    // 6. Update attempts table state to SUBMISSION_UNCERTAIN
+    await tx`UPDATE attempts
+      SET state = 'SUBMISSION_UNCERTAIN'
+      WHERE id = ${attemptId}`;
+
+    // 7. Update outbound_dispatches state to SUBMISSION_UNCERTAIN
     await tx`UPDATE outbound_dispatches
       SET state = 'SUBMISSION_UNCERTAIN',
           updated_at = now()
@@ -53,7 +95,7 @@ export async function markSubmissionUncertain(
 
     return {
       state: 'SUBMISSION_UNCERTAIN',
-      pendingLiabilityHeld: openReservation,
+      pendingLiabilityHeld: openReservation.toString(),
     };
   });
 }
@@ -84,18 +126,35 @@ export async function reconcileUncertainDispatch(
   if (result.outcome === 'CONFIRMED_FAILED_NO_CHARGE') {
     // Release full reservation safely
     await pgClient.begin('isolation level read committed', async tx => {
-      const [fin] = await tx<{
+      // 1. Look up film_id from attempts
+      const [att] = await tx<{
         film_id: string;
-        reservation_open_usd_micros: string;
-      }[]>`SELECT film_id, reservation_open_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId} FOR UPDATE`;
+      }[]>`SELECT film_id FROM attempts WHERE id = ${attemptId}`;
 
-      if (fin) {
+      if (!att) {
+        throw new Error(`Attempt ${attemptId} not found`);
+      }
+      const filmId = att.film_id;
+
+      // 2. Lock film_budget_accounts FIRST
+      const [budget] = await tx<{
+        reserved_open_usd_micros: string;
+        pending_liability_usd_micros: string;
+      }[]>`SELECT reserved_open_usd_micros, pending_liability_usd_micros FROM film_budget_accounts WHERE film_id = ${filmId} FOR UPDATE`;
+
+      // 3. Lock attempt_financial_state SECOND
+      const [fin] = await tx<{
+        reservation_open_usd_micros: string;
+        pending_liability_usd_micros: string;
+      }[]>`SELECT reservation_open_usd_micros, pending_liability_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId} FOR UPDATE`;
+
+      if (budget && fin) {
         const releasedAmount = fin.reservation_open_usd_micros;
         // Post RESERVATION_RELEASED
         await tx`INSERT INTO cost_ledger_events(
           id, film_id, attempt_id, event_type, amount_usd_micros, billing_status, evidence, created_at
         ) VALUES (
-          ${randomUUID()}, ${fin.film_id}, ${attemptId}, 'RESERVATION_RELEASED',
+          ${randomUUID()}, ${filmId}, ${attemptId}, 'RESERVATION_RELEASED',
           ${releasedAmount}, 'FINAL',
           ${JSON.stringify({ reason: 'RECONCILED_FAILED_NO_CHARGE', evidence: result.evidence })}::jsonb,
           now()
@@ -111,10 +170,16 @@ export async function reconcileUncertainDispatch(
 
         // Reset account open reservations
         await tx`UPDATE film_budget_accounts
-          SET reserved_open_usd_micros = GREATEST(0, reserved_open_usd_micros - ${releasedAmount}),
-              pending_liability_usd_micros = GREATEST(0, pending_liability_usd_micros - ${releasedAmount}),
+          SET reserved_open_usd_micros = GREATEST(0, reserved_open_usd_micros - ${releasedAmount}::bigint),
+              pending_liability_usd_micros = GREATEST(0, pending_liability_usd_micros - ${releasedAmount}::bigint),
+              version = version + 1,
               updated_at = now()
-          WHERE film_id = ${fin.film_id}`;
+          WHERE film_id = ${filmId}`;
+
+        // Update attempt state to FAILED
+        await tx`UPDATE attempts
+          SET state = 'FAILED'
+          WHERE id = ${attemptId}`;
       }
 
       await tx`UPDATE outbound_dispatches
@@ -133,6 +198,38 @@ export async function reconcileUncertainDispatch(
 }
 
 /**
+ * Sweeps and recovers stale SUBMITTING claims across all active dispatches.
+ * Used by recovery workers and scheduled health tasks.
+ *
+ * Invariant (G3-B):
+ * Transitions expired SUBMITTING leases to SUBMISSION_UNCERTAIN without
+ * calling provider submit() or releasing financial holds.
+ */
+export async function recoverStaleSubmissions(
+  staleThresholdMs = 30_000,
+): Promise<Array<{ attemptId: string; recovered: boolean }>> {
+  const staleRows = await pgClient<{
+    attempt_id: string;
+    claimed_at: Date;
+  }[]>`SELECT attempt_id, claimed_at FROM outbound_dispatches
+    WHERE state = 'SUBMITTING' AND claimed_at <= now() - (${staleThresholdMs} * interval '1 millisecond')`;
+
+  const results: Array<{ attemptId: string; recovered: boolean }> = [];
+  for (const row of staleRows) {
+    try {
+      await markSubmissionUncertain(
+        row.attempt_id,
+        'Swept stale SUBMITTING claim without remote submission confirmation',
+      );
+      results.push({ attemptId: row.attempt_id, recovered: true });
+    } catch {
+      results.push({ attemptId: row.attempt_id, recovered: false });
+    }
+  }
+  return results;
+}
+
+/**
  * Executes full dispatch lifecycle with crash recovery and SSRF safety.
  */
 export async function dispatchAttempt(
@@ -141,6 +238,13 @@ export async function dispatchAttempt(
   options?: DispatchExecutionOptions,
 ): Promise<DispatchOutcome> {
   const attemptId = request.attemptId;
+
+  // Strict Fail-Closed Execution Mode Barrier (DEC-P05 / BLOCK 3)
+  if (request.executionMode === 'LIVE' && (adapter.isFake || adapter.executionMode !== 'LIVE')) {
+    throw new Error(
+      `LIVE_EXECUTION_MODE_VIOLATION: Attempt ${attemptId} requested LIVE execution mode, but adapter ${adapter.kind} is a fake/fixture transport. Fake transports are strictly prohibited in LIVE mode.`,
+    );
+  }
 
   // Crash point 1: before claim
   if (options?.simulateCrashAt === 'BEFORE_CLAIM') {
@@ -157,6 +261,50 @@ export async function dispatchAttempt(
   `;
 
   if (!claim) {
+    // Claim collision: an existing claim exists in outbound_dispatches!
+    const [existing] = await pgClient<{
+      state: string;
+      claimed_at: Date;
+      provider_job_id: string | null;
+    }[]>`SELECT state, claimed_at, provider_job_id FROM outbound_dispatches WHERE attempt_id = ${attemptId}`;
+
+    if (!existing) {
+      return { outcome: 'ALREADY_CLAIMED', claimToken: null };
+    }
+
+    if (existing.state === 'SUBMITTING') {
+      const leaseAgeMs = Date.now() - new Date(existing.claimed_at).getTime();
+      const thresholdMs = options?.staleLeaseTimeoutMs ?? 30_000;
+      if (leaseAgeMs >= thresholdMs) {
+        // Stale claim detected (G3-B / BLOCK 2):
+        // Worker crashed before completing submit. NEVER execute a blind second paid call.
+        // Instead, transition stale SUBMITTING to SUBMISSION_UNCERTAIN and hold pending liability.
+        await markSubmissionUncertain(
+          attemptId,
+          `Stale SUBMITTING lease expired (${Math.round(leaseAgeMs / 1000)}s old); recovered without re-submitting`,
+        );
+        return {
+          outcome: 'SUBMISSION_UNCERTAIN',
+          reason: 'RECOVERED_STALE_SUBMITTING',
+        };
+      }
+      return { outcome: 'ALREADY_CLAIMED', claimToken: null };
+    }
+
+    if (existing.state === 'SUBMISSION_UNCERTAIN') {
+      return {
+        outcome: 'SUBMISSION_UNCERTAIN',
+        reason: 'ALREADY_SUBMISSION_UNCERTAIN',
+      };
+    }
+
+    if (existing.state === 'SUBMITTED' && existing.provider_job_id) {
+      return {
+        outcome: 'SUBMITTED',
+        providerJobId: existing.provider_job_id,
+      };
+    }
+
     return { outcome: 'ALREADY_CLAIMED', claimToken: null };
   }
 
@@ -167,19 +315,16 @@ export async function dispatchAttempt(
         delivered_at = COALESCE(delivered_at, now())
     WHERE attempt_id = ${attemptId}`;
 
-  // Crash point 2: during HTTP submission call
-  if (options?.simulateCrashAt === 'DURING_HTTP') {
-    await markSubmissionUncertain(attemptId, 'Simulated worker crash during HTTP transmission');
-    return {
-      outcome: 'SUBMISSION_UNCERTAIN',
-      reason: 'Crash during HTTP transmission; financial hold preserved',
-    };
+  // Crash point 2: simulated unhandled crash during HTTP transmission (leaves SUBMITTING in DB)
+  if (options?.simulateCrashAt === 'DURING_HTTP_RAW_CRASH') {
+    throw new Error('SIMULATED_PROCESS_CRASH_DURING_HTTP');
   }
 
   let submission: SubmissionResult;
   try {
     submission = await adapter.submit(request);
   } catch (err: unknown) {
+    // Provider transport failure / timeout: transition safely to SUBMISSION_UNCERTAIN
     await markSubmissionUncertain(attemptId, `Provider HTTP exception: ${err instanceof Error ? err.message : String(err)}`);
     return {
       outcome: 'SUBMISSION_UNCERTAIN',

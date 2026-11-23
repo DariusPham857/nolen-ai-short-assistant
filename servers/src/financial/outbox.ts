@@ -54,18 +54,40 @@ async function delivered(row: OutboxRow, outcome: 'JOB_ID' | 'WORKER_CONFIRMED',
   await pgClient`UPDATE dispatch_outbox SET status='DELIVERED',enqueue_outcome=${outcome},boss_job_id=${jobId},delivered_at=now(),lease_owner=NULL,lease_expires_at=NULL WHERE id=${row.id}`;
 }
 
-async function retry(row: OutboxRow, outcome: 'NULL_UNVERIFIED' | 'UNKNOWN_ENQUEUE_OUTCOME'): Promise<'RETRY' | 'EXHAUSTED'> {
+async function retry(
+  row: OutboxRow,
+  outcome: 'NULL_UNVERIFIED' | 'UNKNOWN_ENQUEUE_OUTCOME',
+  errorDetail?: string,
+): Promise<'RETRY' | 'EXHAUSTED'> {
   const nextRetryCount = row.retry_count + 1;
   const backoff = calculateBackoffDelay(row.retry_count);
 
   if (backoff.isExhausted) {
-    // Ceiling reached: set far in the future so lease() will not auto-select, keeping durable intent inspectable
-    await pgClient`UPDATE dispatch_outbox SET status='PENDING',enqueue_outcome=${outcome},retry_count=${nextRetryCount},next_attempt_at=now()+interval '100 years',lease_owner=NULL,lease_expires_at=NULL WHERE id=${row.id}`;
+    // Durable terminal state EXHAUSTED (G3-C / BLOCK 4):
+    // Preserves durable intent, marks exhausted_at and last_error.
+    // Excluded from automatic lease() sweeps while awaiting operator inspection/recovery.
+    await pgClient`UPDATE dispatch_outbox
+      SET status = 'EXHAUSTED',
+          enqueue_outcome = ${outcome},
+          retry_count = ${nextRetryCount},
+          exhausted_at = now(),
+          last_error = ${errorDetail ?? `Exhausted after ${nextRetryCount} attempts with outcome ${outcome}`},
+          lease_owner = NULL,
+          lease_expires_at = NULL
+      WHERE id = ${row.id}`;
     return 'EXHAUSTED';
   }
 
   const delaySeconds = Math.max(1, Math.round(backoff.delayMs / 1000));
-  await pgClient`UPDATE dispatch_outbox SET status='PENDING',enqueue_outcome=${outcome},retry_count=${nextRetryCount},next_attempt_at=now() + (${delaySeconds} * interval '1 second'),lease_owner=NULL,lease_expires_at=NULL WHERE id=${row.id}`;
+  await pgClient`UPDATE dispatch_outbox
+    SET status = 'PENDING',
+        enqueue_outcome = ${outcome},
+        retry_count = ${nextRetryCount},
+        next_attempt_at = now() + (${delaySeconds} * interval '1 second'),
+        last_error = ${errorDetail ?? null},
+        lease_owner = NULL,
+        lease_expires_at = NULL
+    WHERE id = ${row.id}`;
   return 'RETRY';
 }
 
@@ -84,10 +106,30 @@ export async function relayOne(boss: BossContract, workerId = 'relay'): Promise<
       await delivered(row, 'JOB_ID', row.attempt_id);
       return 'DELIVERED';
     }
-    return await retry(row, 'NULL_UNVERIFIED');
-  } catch {
-    return await retry(row, 'UNKNOWN_ENQUEUE_OUTCOME');
+    return await retry(row, 'NULL_UNVERIFIED', 'pg-boss returned null job id and job was not found in archive');
+  } catch (err: unknown) {
+    return await retry(row, 'UNKNOWN_ENQUEUE_OUTCOME', err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * Manually unfreezes an EXHAUSTED dispatch outbox intent for reprocessing.
+ * Resets status to PENDING and retry_count to 0.
+ */
+export async function resetExhaustedOutbox(outboxId: string): Promise<boolean> {
+  const result = await pgClient`
+    UPDATE dispatch_outbox
+    SET status = 'PENDING',
+        retry_count = 0,
+        next_attempt_at = now(),
+        exhausted_at = NULL,
+        last_error = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL
+    WHERE id = ${outboxId} AND status = 'EXHAUSTED'
+    RETURNING id
+  `;
+  return result.length > 0;
 }
 
 /** At-least-once queue deliveries compete for one durable provider-submission claim. */

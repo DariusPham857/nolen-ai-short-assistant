@@ -7,10 +7,10 @@ Source: [spec](spec.md)
 
 | Task | Tier | Scope & Dependency | Goal / Deliverable | Verification / Acceptance |
 |---|---|---|---|---|
-| PD-01 | R1 | REQUIRED | Zod provider contracts, dispatch schemas & adapter interface | PASS: 4/4 unit tests, typecheck clean, commit `2b419d5` |
-| PD-02 | R1 | REQUIRED | Fake provider adapters (Gemini, Runway, fal.ai) & SSRF validator | PASS: 8/8 unit tests (ssrf + providers), PD-AT-07 RED/GREEN verified |
-| PD-03 | R0 | REQUIRED | `outbound_dispatches` table & bounded outbox relay backoff | PASS: 3/3 relay unit tests (PD-AT-08), backoff + jitter verified, commit `90baee6` |
-| PD-04 | R0 | REQUIRED | Worker crash recovery & submission uncertainty hold | PASS: 2/2 unit tests, dispatch lifecycle & uncertainty hold, commit `3f01bc5` |
+| PD-01 | R1 | REQUIRED | Zod provider contracts, dispatch schemas, execution mode & provenance | PASS: 4/4 unit tests, typecheck clean, commit `2b419d5` |
+| PD-02 | R1 | REQUIRED | Fake provider adapters (Gemini, Runway, fal.ai) with REPLAY provenance & SSRF containment | PASS: 10/10 unit tests (ssrf + providers), PD-AT-07 verified |
+| PD-03 | R0 | REQUIRED | `outbound_dispatches` table & bounded outbox relay backoff | PASS: 3/3 relay unit tests (PD-AT-08), backoff + jitter verified |
+| PD-04 | R0 | REQUIRED | Worker crash recovery, lock hierarchy & submission uncertainty hold | PASS: 3/3 unit tests, dispatch lifecycle & uncertainty hold |
 | PD-05 | R0 | REQUIRED | End-to-end generation dispatch & financial settlement | Full PG16 acceptance tests (PD-AT-01, PD-AT-02, PD-AT-09, PD-AT-10) |
 | PD-06 | R1 | REQUIRED | Quality gates, evidence check & PR handoff | `pnpm -r lint`, `typecheck`, `test`, `test:guardrails`, `check:evidence` |
 
@@ -45,6 +45,27 @@ Source: [spec](spec.md)
     ✓ src/lib/ssrf.test.ts (3 tests) 72ms
     Test Files: 1 passed (1), Tests: 3 passed (3), Duration: 688ms
     ```
+
+- **Test**: `PD-BLOCK-01 & 02: Lock hierarchy, pending liability hold, and stale SUBMITTING lease recovery`
+  - **Command**: `pnpm --filter @nolen/server test:integration src/dispatch/dispatch.integration.test.ts`
+  - **Verification**:
+    - `markSubmissionUncertain` queries `film_id` from `attempts` (not from `attempt_financial_state`), locks `film_budget_accounts` then `attempt_financial_state`, and writes pending liability on both tables.
+    - Stale `SUBMITTING` lease recovers cleanly as `SUBMISSION_UNCERTAIN` without secondary HTTP call.
+    - `recoverStaleSubmissions` sweeps expired worker claims.
+
+- **Test**: `PD-BLOCK-03: Provider execution mode separation and fail-closed LIVE guard`
+  - **Command**: `pnpm --filter @nolen/server test src/providers/providers.test.ts src/dispatch/service.test.ts`
+  - **Verification**:
+    - `createProviderAdapter(kind, 'LIVE')` throws `LIVE_PROVIDER_UNAVAILABLE`.
+    - Fake adapters output `provenance: 'REPLAY_FIXTURE'` and reject requests with `executionMode: 'LIVE'`.
+    - `dispatchAttempt` throws `LIVE_EXECUTION_MODE_VIOLATION` if fake adapter is dispatched in LIVE mode.
+
+- **Test**: `PD-BLOCK-04: Durable Outbox EXHAUSTED state, migration 0005, and manual recovery`
+  - **Command**: `pnpm --filter @nolen/server test:integration src/db/migrate.integration.test.ts`
+  - **Verification**:
+    - Migration 0005 adds `EXHAUSTED` to check constraint and `exhausted_at`, `last_error` columns.
+    - Outbox relay exhaustion transitions row to durable `EXHAUSTED` state and skips future leases.
+    - `resetExhaustedOutbox` unfreezes row back to `PENDING` with `retry_count = 0`.
 
 ## Handoff
 Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).

@@ -8,8 +8,13 @@ import type { ProviderAdapter } from './adapter.js';
 
 export class FakeRunwayAdapter implements ProviderAdapter {
   readonly kind = 'RUNWAY' as const;
+  readonly executionMode = 'REPLAY' as const;
+  readonly isFake = true as const;
 
   async submit(request: GenerationRequest): Promise<SubmissionResult> {
+    if (request.executionMode === 'LIVE') {
+      throw new Error('FAKE_TRANSPORT_FORBIDDEN_IN_LIVE: FakeRunwayAdapter cannot execute in LIVE mode');
+    }
     if (request.kind !== 'VIDEO') {
       throw new Error(`Runway adapter only supports VIDEO generation, received ${request.kind}`);
     }
@@ -19,6 +24,8 @@ export class FakeRunwayAdapter implements ProviderAdapter {
       attemptId: request.attemptId,
       providerJobId,
       state: 'SUBMITTED',
+      executionMode: 'REPLAY',
+      provenance: 'REPLAY_FIXTURE',
       submittedAt: new Date().toISOString(),
       estimatedCompletionSeconds: 25,
     };
@@ -28,6 +35,7 @@ export class FakeRunwayAdapter implements ProviderAdapter {
     return {
       providerJobId,
       state: 'SUCCEEDED',
+      provenance: 'REPLAY_FIXTURE',
       mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/runway-mock-video.mp4',
       rawResponse: { model: 'gen4_turbo', duration: 4 },
     };
@@ -39,7 +47,7 @@ export class FakeRunwayAdapter implements ProviderAdapter {
         attemptId,
         providerJobId,
         outcome: 'CONFIRMED_RUNNING',
-        evidence: `Runway reconciliation confirmed active remote job ${providerJobId}`,
+        evidence: `Runway reconciliation confirmed active fixture job ${providerJobId}`,
       };
     }
     return {
