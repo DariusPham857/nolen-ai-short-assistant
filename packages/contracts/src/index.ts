@@ -1,6 +1,7 @@
 import { z } from 'zod';
 export * from './story.js';
 export * from './financial.js';
+export * from './assets.js';
 
 export const MAX_MICROS = '9223372036854775807';
 export const microsSchema = z.string().regex(/^(0|[1-9]\d*)$/).refine(
