@@ -1898,9 +1898,9 @@
     },
     {
       "relname": "asset_reviews",
-      "conname": "asset_reviews_film_id_asset_id_assets_film_id_id_fk",
+      "conname": "asset_reviews_film_id_asset_id_shot_revision_id_assets_film_id_",
       "contype": "f",
-      "definition": "FOREIGN KEY (film_id, asset_id) REFERENCES assets(film_id, id)"
+      "definition": "FOREIGN KEY (film_id, asset_id, shot_revision_id) REFERENCES assets(film_id, id, shot_revision_id)"
     },
     {
       "relname": "asset_reviews",
@@ -1952,9 +1952,27 @@
     },
     {
       "relname": "assets",
+      "conname": "assets_film_id_id_shot_revision_id_kind_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_id_shot_revision_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id, shot_revision_id)"
+    },
+    {
+      "relname": "assets",
       "conname": "assets_film_id_id_unique",
       "contype": "u",
       "definition": "UNIQUE (film_id, id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_shot_revision_id_kind_attempt_id_attempts_film_i",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id, kind, attempt_id) REFERENCES attempts(film_id, shot_revision_id, kind, id)"
     },
     {
       "relname": "assets",
@@ -2021,6 +2039,12 @@
       "conname": "attempts_film_id_films_id_fk",
       "contype": "f",
       "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_film_id_shot_revision_id_kind_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, shot_revision_id, kind, id)"
     },
     {
       "relname": "attempts",
@@ -2306,9 +2330,9 @@
     },
     {
       "relname": "shot_asset_selections",
-      "conname": "shot_asset_selections_film_id_asset_id_assets_film_id_id_fk",
+      "conname": "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_as",
       "contype": "f",
-      "definition": "FOREIGN KEY (film_id, asset_id) REFERENCES assets(film_id, id)"
+      "definition": "FOREIGN KEY (film_id, asset_id, shot_revision_id, kind) REFERENCES assets(film_id, id, shot_revision_id, kind)"
     },
     {
       "relname": "shot_asset_selections",
@@ -2551,6 +2575,16 @@
     },
     {
       "tablename": "assets",
+      "indexname": "assets_film_id_id_shot_revision_id_kind_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_shot_revision_id_kind_unique ON public.assets USING btree (film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_film_id_id_shot_revision_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_shot_revision_id_unique ON public.assets USING btree (film_id, id, shot_revision_id)"
+    },
+    {
+      "tablename": "assets",
       "indexname": "assets_film_id_id_unique",
       "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_unique ON public.assets USING btree (film_id, id)"
     },
@@ -2563,6 +2597,11 @@
       "tablename": "attempt_financial_state",
       "indexname": "attempt_financial_state_pkey",
       "indexdef": "CREATE UNIQUE INDEX attempt_financial_state_pkey ON public.attempt_financial_state USING btree (attempt_id)"
+    },
+    {
+      "tablename": "attempts",
+      "indexname": "attempts_film_id_shot_revision_id_kind_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX attempts_film_id_shot_revision_id_kind_id_unique ON public.attempts USING btree (film_id, shot_revision_id, kind, id)"
     },
     {
       "tablename": "attempts",
@@ -2794,6 +2833,12 @@
   ],
   "triggers": [
     {
+      "relname": "asset_reviews",
+      "tgname": "kf_asset_reviews_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER kf_asset_reviews_append_only BEFORE DELETE OR UPDATE ON public.asset_reviews FOR EACH ROW EXECUTE FUNCTION kf_guard_append_only()"
+    },
+    {
       "relname": "budget_limit_events",
       "tgname": "fi_budget_limit_events_append_only",
       "tgenabled": "O",
@@ -2888,6 +2933,10 @@
     {
       "proname": "fi_guard_append_only",
       "definition": "CREATE OR REPLACE FUNCTION public.fi_guard_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'FI_APPEND_ONLY'; END $function$\n"
+    },
+    {
+      "proname": "kf_guard_append_only",
+      "definition": "CREATE OR REPLACE FUNCTION public.kf_guard_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'KF_APPEND_ONLY'; END $function$\n"
     },
     {
       "proname": "sp_guard_immutable",

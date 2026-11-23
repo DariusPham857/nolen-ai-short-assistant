@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { unlock } from '../auth/sessions.js';
+import { digest, unlock } from '../auth/sessions.js';
+import { runtimeConfig } from '../config/runtime.js';
 import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { createAssetApi } from '../http/asset-api.js';
@@ -547,5 +548,290 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     // Verify no additional financial ledger events were created by the fake asset producer
     const ledgerAfter = await pgClient`SELECT * FROM cost_ledger_events WHERE film_id = ${f.filmId}`;
     expect(ledgerAfter).toHaveLength(1);
+  });
+
+  it('KF-BLOCK-1: Missing or tampered asset file fails closed with INTEGRITY_CHECK_FAILED', async () => {
+    const f = await createFixture();
+
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId } = await imgRes.json() as { attemptId: string };
+    const asset = await fakeAssetProducer({ filmId: f.filmId, attemptId, shotRevisionId: f.shotRevisionId });
+
+    const filename = `${asset.sha256Hash}.png`;
+
+    // 1A. Tamper with the file before review
+    const originalFile = await storage.read('keyframes', filename);
+    await storage.write('keyframes', filename, Buffer.from('corrupted data'));
+
+    const tamperReviewRes = await request(`/api/assets/${asset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+    expect(tamperReviewRes.status).toBe(422);
+    expect(((await tamperReviewRes.json()) as { error: { code: string } }).error.code).toBe('INTEGRITY_CHECK_FAILED');
+
+    // 1B. Delete the file before review
+    await storage.delete('keyframes', filename);
+    const missingReviewRes = await request(`/api/assets/${asset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+    expect(missingReviewRes.status).toBe(422);
+    expect(((await missingReviewRes.json()) as { error: { code: string } }).error.code).toBe('INTEGRITY_CHECK_FAILED');
+
+    // Restore original file and approve
+    await storage.write('keyframes', filename, originalFile);
+    const approveRes = await request(`/api/assets/${asset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+    expect(approveRes.status).toBe(200);
+
+    // 1C. Tamper with file AFTER approval, then attempt VIDEO dispatch
+    await storage.write('keyframes', filename, Buffer.from('post-approval tampering'));
+    const tamperVidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(tamperVidRes.status).toBe(409);
+    expect(((await tamperVidRes.json()) as { error: { code: string } }).error.code).toBe('INTEGRITY_CHECK_FAILED');
+
+    // 1D. Delete file AFTER approval, then attempt VIDEO dispatch
+    await storage.delete('keyframes', filename);
+    const missingVidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(missingVidRes.status).toBe(409);
+    expect(((await missingVidRes.json()) as { error: { code: string } }).error.code).toBe('INTEGRITY_CHECK_FAILED');
+
+    // Restore file and verify VIDEO dispatch succeeds
+    await storage.write('keyframes', filename, originalFile);
+    const validVidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(validVidRes.status).toBe(201);
+  });
+
+  it('KF-BLOCK-2: Media download requires operator authentication and film ownership', async () => {
+    const f = await createFixture();
+
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId } = await imgRes.json() as { attemptId: string };
+    const asset = await fakeAssetProducer({ filmId: f.filmId, attemptId, shotRevisionId: f.shotRevisionId });
+
+    // 2A. Unauthenticated request (no Cookie header)
+    const unauthRes = await request(`/api/assets/${asset.id}/media`, 'GET', undefined, { Cookie: '' });
+    expect(unauthRes.status).toBe(401);
+    expect(((await unauthRes.json()) as { error: { code: string } }).error.code).toBe('UNAUTHORIZED');
+
+    // 2B. Authenticated as a foreign operator
+    const foreignSessionId = randomBytes(32).toString('base64url');
+    await pgClient`
+      INSERT INTO operator_sessions (session_hash, operator_id, token_fingerprint, expires_at)
+      VALUES (${digest(foreignSessionId)}, 'foreign-operator', ${runtimeConfig().fingerprint}, NOW() + INTERVAL '1 hour')
+    `;
+    const foreignCookie = `nolen_session=${foreignSessionId}`;
+
+    const foreignRes = await request(`/api/assets/${asset.id}/media`, 'GET', undefined, { Cookie: foreignCookie });
+    expect(foreignRes.status).toBe(404);
+    expect(((await foreignRes.json()) as { error: { code: string } }).error.code).toBe('ASSET_NOT_FOUND');
+
+    // 2C. Authorized operator succeeds
+    const authRes = await request(`/api/assets/${asset.id}/media`);
+    expect(authRes.status).toBe(200);
+  });
+
+  it('KF-BLOCK-3: storeAsset enforces attempt provenance and composite foreign key rejects tampering', async () => {
+    const f = await createFixture();
+
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId } = await imgRes.json() as { attemptId: string };
+
+    const validPngBuffer = Buffer.from(
+      '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082',
+      'hex',
+    );
+
+    // 3A. Caller passes mismatched filmId
+    await expect(
+      storeAsset({
+        filmId: randomUUID(),
+        attemptId,
+        shotRevisionId: f.shotRevisionId,
+        kind: 'IMAGE',
+        buffer: validPngBuffer,
+        mimeType: 'image/png',
+      }),
+    ).rejects.toThrow('filmId does not match attempt provenance');
+
+    // 3B. Caller passes mismatched shotRevisionId
+    await expect(
+      storeAsset({
+        filmId: f.filmId,
+        attemptId,
+        shotRevisionId: randomUUID(),
+        kind: 'IMAGE',
+        buffer: validPngBuffer,
+        mimeType: 'image/png',
+      }),
+    ).rejects.toThrow('shotRevisionId does not match attempt provenance');
+
+    // 3C. Caller passes mismatched kind
+    await expect(
+      storeAsset({
+        filmId: f.filmId,
+        attemptId,
+        shotRevisionId: f.shotRevisionId,
+        kind: 'VIDEO',
+        buffer: validPngBuffer,
+        mimeType: 'image/png',
+      }),
+    ).rejects.toThrow('kind does not match attempt provenance');
+
+    // 3D. Direct raw DB insert with mismatched (film_id, shot_revision_id, kind, attempt_id) violates composite FK
+    const dummyAssetId = randomUUID();
+    const otherShotRevId = randomUUID();
+    await expect(
+      pgClient`
+        INSERT INTO assets (
+          id, film_id, attempt_id, shot_revision_id, kind,
+          storage_path, sha256_hash, mime_type, byte_size, verified
+        ) VALUES (
+          ${dummyAssetId}, ${f.filmId}, ${attemptId}, ${otherShotRevId}, 'IMAGE',
+          'keyframes/dummy.png', 'fakehash', 'image/png', 100, true
+        )
+      `,
+    ).rejects.toThrow();
+  });
+
+  it('KF-BLOCK-4: asset_reviews is strictly append-only (UPDATE and DELETE rejected by trigger)', async () => {
+    const f = await createFixture();
+
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId } = await imgRes.json() as { attemptId: string };
+    const asset = await fakeAssetProducer({ filmId: f.filmId, attemptId, shotRevisionId: f.shotRevisionId });
+
+    const reviewRes = await request(`/api/assets/${asset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+    expect(reviewRes.status).toBe(200);
+    const { reviewId } = await reviewRes.json() as { reviewId: string };
+
+    // 4A. Direct UPDATE on asset_reviews is rejected
+    await expect(
+      pgClient`UPDATE asset_reviews SET decision = 'REJECTED' WHERE id = ${reviewId}`,
+    ).rejects.toThrow('KF_APPEND_ONLY');
+
+    // 4B. Direct DELETE on asset_reviews is rejected
+    await expect(
+      pgClient`DELETE FROM asset_reviews WHERE id = ${reviewId}`,
+    ).rejects.toThrow('KF_APPEND_ONLY');
+  });
+
+  it('KF-BLOCK-5: Selection and review cannot link an asset to a mismatched shot revision or kind', async () => {
+    const f = await createFixture();
+
+    // Setup Shot B in the same story revision
+    const shotBId = randomUUID();
+    const shotRevBId = randomUUID();
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotBId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevBId}, ${f.filmId}, ${shotBId}, '{"prompt":"Shot B"}'::jsonb, 'dep-b', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${f.sceneId}, ${shotBId}, ${shotRevBId}, 2)`;
+    });
+
+    // Create and approve image keyframe asset for Shot A
+    const imgResA = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId: attemptAId } = await imgResA.json() as { attemptId: string };
+    const assetA = await fakeAssetProducer({ filmId: f.filmId, attemptId: attemptAId, shotRevisionId: f.shotRevisionId });
+
+    await request(`/api/assets/${assetA.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+
+    // 5A. Direct insert into asset_reviews with assetA but shotRevBId must be rejected by composite FK
+    await expect(
+      pgClient`
+        INSERT INTO asset_reviews (id, asset_id, film_id, shot_revision_id, actor_id, decision, reason)
+        VALUES (${randomUUID()}, ${assetA.id}, ${f.filmId}, ${shotRevBId}, 'local-operator', 'APPROVED', '')
+      `,
+    ).rejects.toThrow();
+
+    // 5B. Direct insert into shot_asset_selections for Shot B with assetA and shotRevBId must be rejected by composite FK
+    await expect(
+      pgClient`
+        INSERT INTO shot_asset_selections (story_revision_id, shot_id, kind, shot_revision_id, asset_id, film_id, selected_by)
+        VALUES (${f.storyRevisionId}, ${shotBId}, 'IMAGE', ${shotRevBId}, ${assetA.id}, ${f.filmId}, 'local-operator')
+      `,
+    ).rejects.toThrow();
+
+    // 5C. Direct insert into shot_asset_selections with mismatched kind ('VIDEO' for image asset) must be rejected by composite FK
+    await expect(
+      pgClient`
+        INSERT INTO shot_asset_selections (story_revision_id, shot_id, kind, shot_revision_id, asset_id, film_id, selected_by)
+        VALUES (${f.storyRevisionId}, ${f.shotId}, 'VIDEO', ${f.shotRevisionId}, ${assetA.id}, ${f.filmId}, 'local-operator')
+      `,
+    ).rejects.toThrow();
+
+    // 5D. VIDEO admission for Shot B must fail with KEYFRAME_APPROVAL_REQUIRED (Shot A's keyframe cannot unlock Shot B)
+    const vidResB = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: shotRevBId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(vidResB.status).toBe(409);
+    expect(((await vidResB.json()) as { error: { code: string } }).error.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
   });
 });

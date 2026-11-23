@@ -72,6 +72,7 @@ export const attempts = pgTable('attempts', {
   check('attempt_values_valid', sql`${table.pricingUnits} > 0 AND ${table.reservationUsdMicros} >= 0`),
   foreignKey({ columns: [table.filmId, table.storyRevisionId], foreignColumns: [storyRevisions.filmId, storyRevisions.id] }),
   foreignKey({ columns: [table.filmId, table.shotRevisionId], foreignColumns: [shotRevisions.filmId, shotRevisions.id] }),
+  unique().on(table.filmId, table.shotRevisionId, table.kind, table.id),
 ]);
 
 export const attemptFinancialState = pgTable('attempt_financial_state', {

@@ -19,9 +19,15 @@ export const assets = pgTable('assets', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   unique().on(table.filmId, table.id),
+  unique().on(table.filmId, table.id, table.shotRevisionId),
+  unique().on(table.filmId, table.id, table.shotRevisionId, table.kind),
   foreignKey({
     columns: [table.filmId, table.shotRevisionId],
     foreignColumns: [shotRevisions.filmId, shotRevisions.id],
+  }),
+  foreignKey({
+    columns: [table.filmId, table.shotRevisionId, table.kind, table.attemptId],
+    foreignColumns: [attempts.filmId, attempts.shotRevisionId, attempts.kind, attempts.id],
   }),
   check('asset_kind_valid', sql`${table.kind} IN ('IMAGE', 'VIDEO')`),
   check('asset_byte_size_nonnegative', sql`${table.byteSize} >= 0`),
@@ -39,8 +45,8 @@ export const assetReviews = pgTable('asset_reviews', {
 }, table => [
   index('asset_reviews_latest_idx').on(table.assetId, table.createdAt, table.id),
   foreignKey({
-    columns: [table.filmId, table.assetId],
-    foreignColumns: [assets.filmId, assets.id],
+    columns: [table.filmId, table.assetId, table.shotRevisionId],
+    foreignColumns: [assets.filmId, assets.id, assets.shotRevisionId],
   }),
   foreignKey({
     columns: [table.filmId, table.shotRevisionId],
@@ -65,8 +71,8 @@ export const shotAssetSelections = pgTable('shot_asset_selections', {
     foreignColumns: [storyRevisionShots.storyRevisionId, storyRevisionShots.shotId],
   }),
   foreignKey({
-    columns: [table.filmId, table.assetId],
-    foreignColumns: [assets.filmId, assets.id],
+    columns: [table.filmId, table.assetId, table.shotRevisionId, table.kind],
+    foreignColumns: [assets.filmId, assets.id, assets.shotRevisionId, assets.kind],
   }),
   foreignKey({
     columns: [table.filmId, table.shotRevisionId],

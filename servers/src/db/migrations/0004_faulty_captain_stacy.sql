@@ -25,6 +25,8 @@ CREATE TABLE "assets" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "assets_attempt_id_unique" UNIQUE("attempt_id"),
 	CONSTRAINT "assets_film_id_id_unique" UNIQUE("film_id","id"),
+	CONSTRAINT "assets_film_id_id_shot_revision_id_unique" UNIQUE("film_id","id","shot_revision_id"),
+	CONSTRAINT "assets_film_id_id_shot_revision_id_kind_unique" UNIQUE("film_id","id","shot_revision_id","kind"),
 	CONSTRAINT "asset_kind_valid" CHECK ("assets"."kind" IN ('IMAGE', 'VIDEO')),
 	CONSTRAINT "asset_byte_size_nonnegative" CHECK ("assets"."byte_size" >= 0)
 );
@@ -43,13 +45,18 @@ CREATE TABLE "shot_asset_selections" (
 );
 --> statement-breakpoint
 ALTER TABLE "asset_reviews" ADD CONSTRAINT "asset_reviews_film_id_films_id_fk" FOREIGN KEY ("film_id") REFERENCES "public"."films"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "asset_reviews" ADD CONSTRAINT "asset_reviews_film_id_asset_id_assets_film_id_id_fk" FOREIGN KEY ("film_id","asset_id") REFERENCES "public"."assets"("film_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "asset_reviews" ADD CONSTRAINT "asset_reviews_film_id_asset_id_shot_revision_id_assets_film_id_id_shot_revision_id_fk" FOREIGN KEY ("film_id","asset_id","shot_revision_id") REFERENCES "public"."assets"("film_id","id","shot_revision_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "asset_reviews" ADD CONSTRAINT "asset_reviews_film_id_shot_revision_id_shot_revisions_film_id_id_fk" FOREIGN KEY ("film_id","shot_revision_id") REFERENCES "public"."shot_revisions"("film_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assets" ADD CONSTRAINT "assets_film_id_films_id_fk" FOREIGN KEY ("film_id") REFERENCES "public"."films"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assets" ADD CONSTRAINT "assets_attempt_id_attempts_id_fk" FOREIGN KEY ("attempt_id") REFERENCES "public"."attempts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assets" ADD CONSTRAINT "assets_film_id_shot_revision_id_shot_revisions_film_id_id_fk" FOREIGN KEY ("film_id","shot_revision_id") REFERENCES "public"."shot_revisions"("film_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_film_id_films_id_fk" FOREIGN KEY ("film_id") REFERENCES "public"."films"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_story_revision_id_shot_id_story_revision_shots_story_revision_id_shot_id_fk" FOREIGN KEY ("story_revision_id","shot_id") REFERENCES "public"."story_revision_shots"("story_revision_id","shot_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_film_id_asset_id_assets_film_id_id_fk" FOREIGN KEY ("film_id","asset_id") REFERENCES "public"."assets"("film_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_assets_film_id_id_shot_revision_id_kind_fk" FOREIGN KEY ("film_id","asset_id","shot_revision_id","kind") REFERENCES "public"."assets"("film_id","id","shot_revision_id","kind") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_film_id_shot_revision_id_shot_revisions_film_id_id_fk" FOREIGN KEY ("film_id","shot_revision_id") REFERENCES "public"."shot_revisions"("film_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "asset_reviews_latest_idx" ON "asset_reviews" USING btree ("asset_id","created_at","id");
+ALTER TABLE "attempts" ADD CONSTRAINT "attempts_film_id_shot_revision_id_kind_id_unique" UNIQUE("film_id","shot_revision_id","kind","id");--> statement-breakpoint
+ALTER TABLE "assets" ADD CONSTRAINT "assets_film_id_shot_revision_id_kind_attempt_id_attempts_film_id_shot_revision_id_kind_id_fk" FOREIGN KEY ("film_id","shot_revision_id","kind","attempt_id") REFERENCES "public"."attempts"("film_id","shot_revision_id","kind","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "asset_reviews_latest_idx" ON "asset_reviews" USING btree ("asset_id","created_at","id");--> statement-breakpoint
+CREATE FUNCTION kf_guard_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'KF_APPEND_ONLY'; END $$;--> statement-breakpoint
+CREATE TRIGGER kf_asset_reviews_append_only BEFORE UPDATE OR DELETE ON asset_reviews FOR EACH ROW EXECUTE FUNCTION kf_guard_append_only();

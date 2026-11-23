@@ -1215,7 +1215,18 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "attempts_film_id_shot_revision_id_kind_id_unique": {
+          "name": "attempts_film_id_shot_revision_id_kind_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "shot_revision_id",
+            "kind",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "attempt_kind_valid": {
@@ -1984,17 +1995,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "asset_reviews_film_id_asset_id_assets_film_id_id_fk": {
-          "name": "asset_reviews_film_id_asset_id_assets_film_id_id_fk",
+        "asset_reviews_film_id_asset_id_shot_revision_id_assets_film_id_id_shot_revision_id_fk": {
+          "name": "asset_reviews_film_id_asset_id_shot_revision_id_assets_film_id_id_shot_revision_id_fk",
           "tableFrom": "asset_reviews",
           "tableTo": "assets",
           "columnsFrom": [
             "film_id",
-            "asset_id"
+            "asset_id",
+            "shot_revision_id"
           ],
           "columnsTo": [
             "film_id",
-            "id"
+            "id",
+            "shot_revision_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -2148,6 +2161,25 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "assets_film_id_shot_revision_id_kind_attempt_id_attempts_film_id_shot_revision_id_kind_id_fk": {
+          "name": "assets_film_id_shot_revision_id_kind_attempt_id_attempts_film_id_shot_revision_id_kind_id_fk",
+          "tableFrom": "assets",
+          "tableTo": "attempts",
+          "columnsFrom": [
+            "film_id",
+            "shot_revision_id",
+            "kind",
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "film_id",
+            "shot_revision_id",
+            "kind",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2165,6 +2197,25 @@
           "columns": [
             "film_id",
             "id"
+          ]
+        },
+        "assets_film_id_id_shot_revision_id_unique": {
+          "name": "assets_film_id_id_shot_revision_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "id",
+            "shot_revision_id"
+          ]
+        },
+        "assets_film_id_id_shot_revision_id_kind_unique": {
+          "name": "assets_film_id_id_shot_revision_id_kind_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "film_id",
+            "id",
+            "shot_revision_id",
+            "kind"
           ]
         }
       },
@@ -2265,17 +2316,21 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "shot_asset_selections_film_id_asset_id_assets_film_id_id_fk": {
-          "name": "shot_asset_selections_film_id_asset_id_assets_film_id_id_fk",
+        "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_assets_film_id_id_shot_revision_id_kind_fk": {
+          "name": "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_assets_film_id_id_shot_revision_id_kind_fk",
           "tableFrom": "shot_asset_selections",
           "tableTo": "assets",
           "columnsFrom": [
             "film_id",
-            "asset_id"
+            "asset_id",
+            "shot_revision_id",
+            "kind"
           ],
           "columnsTo": [
             "film_id",
-            "id"
+            "id",
+            "shot_revision_id",
+            "kind"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"

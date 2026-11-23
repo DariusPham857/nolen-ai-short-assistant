@@ -56,15 +56,51 @@ export function toAssetDto(row: AssetRow): AssetDto {
 
 /** Store a media asset with content-addressed storage and database registration. */
 export async function storeAsset(input: {
-  filmId: string;
   attemptId: string;
-  shotRevisionId: string;
-  kind: 'IMAGE' | 'VIDEO';
   buffer: Buffer;
   mimeType: string;
+  filmId?: string;
+  shotRevisionId?: string;
+  kind?: 'IMAGE' | 'VIDEO';
   metadata?: Record<string, unknown>;
 }): Promise<AssetDto> {
-  const maxBytes = input.kind === 'IMAGE' ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+  // Derive and verify provenance from the attempt row
+  const [attempt] = await pgClient<{
+    id: string;
+    film_id: string;
+    shot_revision_id: string | null;
+    kind: 'IMAGE' | 'VIDEO' | 'TTS' | 'ASSEMBLY';
+  }[]>`
+    SELECT id, film_id, shot_revision_id, kind
+    FROM attempts
+    WHERE id = ${input.attemptId}
+  `;
+  if (!attempt) {
+    throw new ApiFailure(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found');
+  }
+  if (!attempt.shot_revision_id) {
+    throw new ApiFailure(422, 'INVALID_ATTEMPT_KIND', 'Attempt is not tied to a shot revision');
+  }
+  if (!['IMAGE', 'VIDEO'].includes(attempt.kind)) {
+    throw new ApiFailure(422, 'INVALID_ATTEMPT_KIND', 'Attempt kind is not eligible for media asset storage');
+  }
+
+  // Fail closed if caller supplied conflicting provenance
+  if (input.filmId && input.filmId !== attempt.film_id) {
+    throw new ApiFailure(422, 'ATTEMPT_PROVENANCE_MISMATCH', 'filmId does not match attempt provenance');
+  }
+  if (input.shotRevisionId && input.shotRevisionId !== attempt.shot_revision_id) {
+    throw new ApiFailure(422, 'ATTEMPT_PROVENANCE_MISMATCH', 'shotRevisionId does not match attempt provenance');
+  }
+  if (input.kind && input.kind !== attempt.kind) {
+    throw new ApiFailure(422, 'ATTEMPT_PROVENANCE_MISMATCH', 'kind does not match attempt provenance');
+  }
+
+  const filmId = attempt.film_id;
+  const shotRevisionId = attempt.shot_revision_id;
+  const kind = attempt.kind as 'IMAGE' | 'VIDEO';
+
+  const maxBytes = kind === 'IMAGE' ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
   if (input.buffer.length > maxBytes) {
     throw new ApiFailure(413, 'PAYLOAD_TOO_LARGE', `Asset byte size exceeds limit of ${maxBytes} bytes`);
   }
@@ -74,16 +110,16 @@ export async function storeAsset(input: {
     throw new ApiFailure(415, 'UNSUPPORTED_MEDIA_TYPE', `Unsupported mime type: ${input.mimeType}`);
   }
 
-  if (input.kind === 'IMAGE' && !input.mimeType.startsWith('image/')) {
+  if (kind === 'IMAGE' && !input.mimeType.startsWith('image/')) {
     throw new ApiFailure(422, 'INVALID_ASSET_KIND', 'Image assets require image MIME type');
   }
-  if (input.kind === 'VIDEO' && !input.mimeType.startsWith('video/')) {
+  if (kind === 'VIDEO' && !input.mimeType.startsWith('video/')) {
     throw new ApiFailure(422, 'INVALID_ASSET_KIND', 'Video assets require video MIME type');
   }
 
   const sha256 = createHash('sha256').update(input.buffer).digest('hex');
   const filename = `${sha256}${ext}`;
-  const category: AssetCategory = input.kind === 'IMAGE' ? 'keyframes' : 'videos';
+  const category: AssetCategory = kind === 'IMAGE' ? 'keyframes' : 'videos';
 
   await storage.write(category, filename, input.buffer);
   const storagePath = `${category}/${filename}`;
@@ -96,7 +132,7 @@ export async function storeAsset(input: {
         storage_path, sha256_hash, mime_type, byte_size,
         verified, metadata, created_at
       ) VALUES (
-        ${assetId}, ${input.filmId}, ${input.attemptId}, ${input.shotRevisionId}, ${input.kind},
+        ${assetId}, ${filmId}, ${input.attemptId}, ${shotRevisionId}, ${kind},
         ${storagePath}, ${sha256}, ${input.mimeType}, ${input.buffer.length},
         true, ${JSON.stringify(input.metadata ?? {})}::jsonb, clock_timestamp()
       )
@@ -162,7 +198,16 @@ export async function reviewAsset(
     const category: AssetCategory = asset.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
     const filename = path.basename(asset.storage_path);
     if (!storage.exists(category, filename)) {
-      throw new ApiFailure(500, 'ASSET_FILE_MISSING', 'Asset file missing from storage');
+      throw new ApiFailure(422, 'INTEGRITY_CHECK_FAILED', 'Asset file missing from storage');
+    }
+    let verifiedOnDisk = false;
+    try {
+      verifiedOnDisk = await storage.verify(category, filename, asset.sha256_hash);
+    } catch {
+      verifiedOnDisk = false;
+    }
+    if (!verifiedOnDisk) {
+      throw new ApiFailure(422, 'INTEGRITY_CHECK_FAILED', 'Asset file on disk failed integrity check');
     }
 
     const reviewId = randomUUID();
@@ -295,15 +340,18 @@ export async function getShotAssets(
   }));
 }
 
-/** Retrieve asset media file buffer and metadata. */
-export async function getAssetMedia(assetId: string): Promise<{
+/** Retrieve asset media file buffer and metadata with operator authorization check. */
+export async function getAssetMedia(assetId: string, operatorId: string): Promise<{
   buffer: Buffer;
   mimeType: string;
   byteSize: string;
   sha256: string;
 }> {
   const [asset] = await pgClient<AssetRow[]>`
-    SELECT * FROM assets WHERE id = ${assetId}
+    SELECT a.*
+    FROM assets a
+    JOIN films f ON f.id = a.film_id
+    WHERE a.id = ${assetId} AND f.operator_id = ${operatorId}
   `;
   if (!asset) {
     throw new ApiFailure(404, 'ASSET_NOT_FOUND', 'Asset not found');
