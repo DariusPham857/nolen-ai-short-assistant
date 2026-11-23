@@ -10,6 +10,16 @@ export interface DispatchExecutionOptions {
   staleLeaseTimeoutMs?: number;
 }
 
+export interface MarkSubmissionUncertainCasCriteria {
+  claimToken?: string;
+  claimedAt?: Date | string;
+  expectedState?: string;
+}
+
+export type MarkSubmissionUncertainResult =
+  | { state: 'SUBMISSION_UNCERTAIN'; pendingLiabilityHeld: string; skipped?: false }
+  | { state: null; skipped: true };
+
 export type DispatchOutcome =
   | { outcome: 'ALREADY_CLAIMED'; claimToken: null }
   | { outcome: 'SUBMITTED'; providerJobId: string }
@@ -21,6 +31,12 @@ export type DispatchOutcome =
  * Marks an in-flight dispatch as SUBMISSION_UNCERTAIN following worker crash,
  * network drop, or ambiguous 5xx/429 response.
  *
+ * When casCriteria is provided:
+ * - Performs Compare-And-Swap (CAS) on outbound_dispatches matching:
+ *   WHERE attempt_id = ... AND state = ... AND claim_token = ... AND claimed_at = ...
+ * - If CAS fails (0 rows updated), skips mutation and returns { state: null, skipped: true }.
+ * - Only locks film_budget_accounts and attempt_financial_state IF CAS succeeds.
+ *
  * Invariant (G3-A / DEC-P02):
  * - Lock hierarchy: film_budget_accounts FOR UPDATE must precede attempt_financial_state FOR UPDATE.
  * - Film ID is read from `attempts` (not attempt_financial_state).
@@ -30,9 +46,64 @@ export type DispatchOutcome =
 export async function markSubmissionUncertain(
   attemptId: string,
   reason: string,
-): Promise<{ state: 'SUBMISSION_UNCERTAIN'; pendingLiabilityHeld: string }> {
+  casCriteria?: MarkSubmissionUncertainCasCriteria,
+): Promise<MarkSubmissionUncertainResult> {
   return pgClient.begin('isolation level read committed', async tx => {
-    // 1. Look up film_id from attempts
+    // 1. Guard with CAS on outbound_dispatches if CAS criteria provided
+    if (casCriteria) {
+      const expectedState = casCriteria.expectedState ?? 'SUBMITTING';
+      let updated: { attempt_id: string }[] = [];
+
+      if (casCriteria.claimToken && casCriteria.claimedAt) {
+        updated = await tx<{ attempt_id: string }[]>`
+          UPDATE outbound_dispatches
+          SET state = 'SUBMISSION_UNCERTAIN',
+              updated_at = now()
+          WHERE attempt_id = ${attemptId}
+            AND state = ${expectedState}
+            AND claim_token = ${casCriteria.claimToken}
+            AND (claimed_at = ${casCriteria.claimedAt} OR date_trunc('milliseconds', claimed_at) = date_trunc('milliseconds', ${casCriteria.claimedAt}::timestamptz))
+          RETURNING attempt_id
+        `;
+      } else if (casCriteria.claimToken) {
+        updated = await tx<{ attempt_id: string }[]>`
+          UPDATE outbound_dispatches
+          SET state = 'SUBMISSION_UNCERTAIN',
+              updated_at = now()
+          WHERE attempt_id = ${attemptId}
+            AND state = ${expectedState}
+            AND claim_token = ${casCriteria.claimToken}
+          RETURNING attempt_id
+        `;
+      } else if (casCriteria.claimedAt) {
+        updated = await tx<{ attempt_id: string }[]>`
+          UPDATE outbound_dispatches
+          SET state = 'SUBMISSION_UNCERTAIN',
+              updated_at = now()
+          WHERE attempt_id = ${attemptId}
+            AND state = ${expectedState}
+            AND (claimed_at = ${casCriteria.claimedAt} OR date_trunc('milliseconds', claimed_at) = date_trunc('milliseconds', ${casCriteria.claimedAt}::timestamptz))
+          RETURNING attempt_id
+        `;
+      } else {
+        updated = await tx<{ attempt_id: string }[]>`
+          UPDATE outbound_dispatches
+          SET state = 'SUBMISSION_UNCERTAIN',
+              updated_at = now()
+          WHERE attempt_id = ${attemptId}
+            AND state = ${expectedState}
+          RETURNING attempt_id
+        `;
+      }
+
+      if (updated.length === 0) {
+        // CAS failed! A concurrent worker or actor changed the state or token.
+        // Crucially: do NOT mutate attempts table or financial state (attempt_financial_state and film_budget_accounts).
+        return { state: null, skipped: true };
+      }
+    }
+
+    // 2. Look up film_id from attempts
     const [att] = await tx<{
       film_id: string;
     }[]>`SELECT film_id FROM attempts WHERE id = ${attemptId}`;
@@ -42,7 +113,7 @@ export async function markSubmissionUncertain(
     }
     const filmId = att.film_id;
 
-    // 2. Lock film_budget_accounts FIRST (hierarchical lock ordering DEC-P02)
+    // 3. Lock film_budget_accounts FIRST (hierarchical lock ordering DEC-P02)
     const [budget] = await tx<{
       pending_liability_usd_micros: string;
       reserved_open_usd_micros: string;
@@ -52,7 +123,7 @@ export async function markSubmissionUncertain(
       throw new Error(`Budget account for film ${filmId} not found`);
     }
 
-    // 3. Lock attempt_financial_state SECOND
+    // 4. Lock attempt_financial_state SECOND
     const [fin] = await tx<{
       reservation_open_usd_micros: string;
       pending_liability_usd_micros: string;
@@ -66,13 +137,13 @@ export async function markSubmissionUncertain(
     const priorAttemptPending = BigInt(fin.pending_liability_usd_micros);
     const deltaPending = openReservation - priorAttemptPending;
 
-    // 4. Update attempt_financial_state: pending liability equal to open reservation
+    // 5. Update attempt_financial_state: pending liability equal to open reservation
     await tx`UPDATE attempt_financial_state
       SET pending_liability_usd_micros = ${openReservation.toString()},
           updated_at = now()
       WHERE attempt_id = ${attemptId}`;
 
-    // 5. Update film_budget_accounts: adjust pending liability by deltaPending
+    // 6. Update film_budget_accounts: adjust pending liability by deltaPending
     if (deltaPending !== 0n) {
       const newFilmPending = BigInt(budget.pending_liability_usd_micros) + deltaPending;
       await tx`UPDATE film_budget_accounts
@@ -82,16 +153,18 @@ export async function markSubmissionUncertain(
         WHERE film_id = ${filmId}`;
     }
 
-    // 6. Update attempts table state to SUBMISSION_UNCERTAIN
+    // 7. Update attempts table state to SUBMISSION_UNCERTAIN
     await tx`UPDATE attempts
       SET state = 'SUBMISSION_UNCERTAIN'
       WHERE id = ${attemptId}`;
 
-    // 7. Update outbound_dispatches state to SUBMISSION_UNCERTAIN
-    await tx`UPDATE outbound_dispatches
-      SET state = 'SUBMISSION_UNCERTAIN',
-          updated_at = now()
-      WHERE attempt_id = ${attemptId}`;
+    // 8. If unconditional (no CAS criteria provided), update outbound_dispatches state
+    if (!casCriteria) {
+      await tx`UPDATE outbound_dispatches
+        SET state = 'SUBMISSION_UNCERTAIN',
+            updated_at = now()
+        WHERE attempt_id = ${attemptId}`;
+    }
 
     return {
       state: 'SUBMISSION_UNCERTAIN',
@@ -249,18 +322,27 @@ export async function recoverStaleSubmissions(
 ): Promise<Array<{ attemptId: string; recovered: boolean }>> {
   const staleRows = await pgClient<{
     attempt_id: string;
+    claim_token: string;
     claimed_at: Date;
-  }[]>`SELECT attempt_id, claimed_at FROM outbound_dispatches
+  }[]>`SELECT attempt_id, claim_token, claimed_at FROM outbound_dispatches
     WHERE state = 'SUBMITTING' AND claimed_at <= now() - (${staleThresholdMs} * interval '1 millisecond')`;
 
   const results: Array<{ attemptId: string; recovered: boolean }> = [];
   for (const row of staleRows) {
     try {
-      await markSubmissionUncertain(
+      const outcome = await markSubmissionUncertain(
         row.attempt_id,
         'Swept stale SUBMITTING claim without remote submission confirmation',
+        {
+          claimToken: row.claim_token,
+          claimedAt: row.claimed_at,
+          expectedState: 'SUBMITTING',
+        },
       );
-      results.push({ attemptId: row.attempt_id, recovered: true });
+      results.push({
+        attemptId: row.attempt_id,
+        recovered: !outcome.skipped && outcome.state === 'SUBMISSION_UNCERTAIN',
+      });
     } catch {
       results.push({ attemptId: row.attempt_id, recovered: false });
     }
@@ -303,9 +385,10 @@ export async function dispatchAttempt(
     // Claim collision: an existing claim exists in outbound_dispatches!
     const [existing] = await pgClient<{
       state: string;
+      claim_token: string;
       claimed_at: Date;
       provider_job_id: string | null;
-    }[]>`SELECT state, claimed_at, provider_job_id FROM outbound_dispatches WHERE attempt_id = ${attemptId}`;
+    }[]>`SELECT state, claim_token, claimed_at, provider_job_id FROM outbound_dispatches WHERE attempt_id = ${attemptId}`;
 
     if (!existing) {
       return { outcome: 'ALREADY_CLAIMED', claimToken: null };
@@ -318,10 +401,18 @@ export async function dispatchAttempt(
         // Stale claim detected (G3-B / BLOCK 2):
         // Worker crashed before completing submit. NEVER execute a blind second paid call.
         // Instead, transition stale SUBMITTING to SUBMISSION_UNCERTAIN and hold pending liability.
-        await markSubmissionUncertain(
+        const uncert = await markSubmissionUncertain(
           attemptId,
           `Stale SUBMITTING lease expired (${Math.round(leaseAgeMs / 1000)}s old); recovered without re-submitting`,
+          {
+            claimToken: existing.claim_token,
+            claimedAt: existing.claimed_at,
+            expectedState: 'SUBMITTING',
+          },
         );
+        if (uncert.skipped) {
+          return { outcome: 'ALREADY_CLAIMED', claimToken: null };
+        }
         return {
           outcome: 'SUBMISSION_UNCERTAIN',
           reason: 'RECOVERED_STALE_SUBMITTING',
@@ -364,7 +455,11 @@ export async function dispatchAttempt(
     submission = await adapter.submit(request);
   } catch (err: unknown) {
     // Provider transport failure / timeout: transition safely to SUBMISSION_UNCERTAIN
-    await markSubmissionUncertain(attemptId, `Provider HTTP exception: ${err instanceof Error ? err.message : String(err)}`);
+    await markSubmissionUncertain(
+      attemptId,
+      `Provider HTTP exception: ${err instanceof Error ? err.message : String(err)}`,
+      { claimToken, expectedState: 'SUBMITTING' },
+    );
     return {
       outcome: 'SUBMISSION_UNCERTAIN',
       reason: 'Provider transport failure; preserved as SUBMISSION_UNCERTAIN',

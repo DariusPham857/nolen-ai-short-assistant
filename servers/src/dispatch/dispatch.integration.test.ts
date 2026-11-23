@@ -214,6 +214,9 @@ describe.runIf(isLiveDb)('Dispatch & Recovery Integration Tests (PostgreSQL 16) 
   });
 
   it('BLOCK 4: outbox relay exhaustion transitions row to EXHAUSTED and resetExhaustedOutbox unfreezes it', async () => {
+    // Clear outbox to ensure hermetic lease
+    await pgClient`DELETE FROM dispatch_outbox`;
+
     const { attemptId } = await seedAttemptFixture('300000');
     const outboxId = randomUUID();
 
@@ -221,7 +224,7 @@ describe.runIf(isLiveDb)('Dispatch & Recovery Integration Tests (PostgreSQL 16) 
     await pgClient`INSERT INTO dispatch_outbox(
       id, attempt_id, queue_name, payload, status, retry_count, next_attempt_at
     ) VALUES (
-      ${outboxId}, ${attemptId}, 'provider-dispatch', '{"attemptId":"${attemptId}"}'::jsonb,
+      ${outboxId}, ${attemptId}, 'provider-dispatch', ${JSON.stringify({ attemptId })}::jsonb,
       'PENDING', 5, now() - interval '1 second'
     )`;
 
