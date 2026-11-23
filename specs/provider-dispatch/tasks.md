@@ -67,6 +67,13 @@ Source: [spec](spec.md)
     - Outbox relay exhaustion transitions row to durable `EXHAUSTED` state and skips future leases.
     - `resetExhaustedOutbox` unfreezes row back to `PENDING` with `retry_count = 0`.
 
+- **Test**: `PD-BLOCK-05: CAS state barrier on provider submit persist & sweeper interleaving`
+  - **Command**: `pnpm --filter @nolen/server test:integration src/dispatch/dispatch.integration.test.ts`
+  - **Verification**:
+    - Worker persists `SUBMITTED` only via CAS matching `WHERE attempt_id = ... AND state = 'SUBMITTING' AND claim_token = ...`.
+    - If sweeper expired lease and marked `SUBMISSION_UNCERTAIN` while HTTP was in flight, CAS safely fails and passes `providerJobId` directly to `reconcileUncertainDispatch`.
+    - Reconciliation resets pending liability and synchronizes `attempts` and `outbound_dispatches` without state divergence.
+
 ## Handoff
 Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
 Record actual check statuses and remaining blockers, never anticipated results.

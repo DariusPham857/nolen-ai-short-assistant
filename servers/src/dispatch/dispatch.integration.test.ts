@@ -159,6 +159,60 @@ describe.runIf(isLiveDb)('Dispatch & Recovery Integration Tests (PostgreSQL 16) 
     expect(dispatch.state).toBe('SUBMISSION_UNCERTAIN');
   });
 
+  it('CAS Race: slow submit returning after sweeper execution does not overwrite SUBMISSION_UNCERTAIN and triggers reconciliation', async () => {
+    const { attemptId, request } = await seedAttemptFixture('800000');
+
+    // Slow adapter: during submit, interleaves a sweeper run that marks submission uncertain!
+    const slowAdapter: ProviderAdapter = {
+      kind: 'GEMINI',
+      executionMode: 'REPLAY',
+      isFake: true,
+      submit: vi.fn().mockImplementation(async () => {
+        // Interleaved race condition: while HTTP is in flight, sweeper marks attempt uncertain!
+        await markSubmissionUncertain(attemptId, 'Sweeper expired stale lease during slow HTTP response');
+        return {
+          attemptId,
+          providerJobId: 'slow-job-recovered-123',
+          state: 'SUBMITTED',
+          executionMode: 'REPLAY',
+          provenance: 'REPLAY_FIXTURE',
+          submittedAt: new Date().toISOString(),
+        };
+      }),
+      pollStatus: vi.fn(),
+      reconcile: vi.fn().mockResolvedValue({
+        attemptId,
+        providerJobId: 'slow-job-recovered-123',
+        outcome: 'CONFIRMED_RUNNING',
+        evidence: 'Reconciled in-flight job verified with remote provider',
+      }),
+    };
+
+    const outcome = await dispatchAttempt(request, slowAdapter);
+    expect(outcome.outcome).toBe('SUBMISSION_UNCERTAIN');
+    expect((outcome as { reason: string }).reason).toContain('CAS lost to concurrent transition');
+
+    // Verify reconciliation was triggered
+    expect(slowAdapter.reconcile).toHaveBeenCalledWith(attemptId, 'slow-job-recovered-123');
+
+    // Verify database state: outbound_dispatches has provider_job_id and is SUBMITTED
+    const [dispatch] = await pgClient<{ state: string; provider_job_id: string }[]>`
+      SELECT state, provider_job_id FROM outbound_dispatches WHERE attempt_id = ${attemptId}
+    `;
+    expect(dispatch.state).toBe('SUBMITTED');
+    expect(dispatch.provider_job_id).toBe('slow-job-recovered-123');
+
+    // Verify attempts table state is updated to RUNNING (via CONFIRMED_RUNNING reconciliation)
+    const [att] = await pgClient<{ state: string }[]>`SELECT state FROM attempts WHERE id = ${attemptId}`;
+    expect(att.state).toBe('RUNNING');
+
+    // Verify pending liability on attempt_financial_state was safely reset to 0 (since now confirmed running)
+    const [fin] = await pgClient<{ pending_liability_usd_micros: string }[]>`
+      SELECT pending_liability_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId}
+    `;
+    expect(fin.pending_liability_usd_micros).toBe('0');
+  });
+
   it('BLOCK 4: outbox relay exhaustion transitions row to EXHAUSTED and resetExhaustedOutbox unfreezes it', async () => {
     const { attemptId } = await seedAttemptFixture('300000');
     const outboxId = randomUUID();

@@ -188,10 +188,49 @@ export async function reconcileUncertainDispatch(
         WHERE attempt_id = ${attemptId}`;
     });
   } else if (result.outcome === 'CONFIRMED_SUCCEEDED' || result.outcome === 'CONFIRMED_RUNNING') {
-    await pgClient`UPDATE outbound_dispatches
-      SET state = 'SUBMITTED',
-          updated_at = now()
-      WHERE attempt_id = ${attemptId}`;
+    await pgClient.begin('isolation level read committed', async tx => {
+      const [att] = await tx<{
+        film_id: string;
+      }[]>`SELECT film_id FROM attempts WHERE id = ${attemptId}`;
+
+      if (att) {
+        const filmId = att.film_id;
+        // Lock budget accounts then attempt financial state
+        const [budget] = await tx<{
+          pending_liability_usd_micros: string;
+        }[]>`SELECT pending_liability_usd_micros FROM film_budget_accounts WHERE film_id = ${filmId} FOR UPDATE`;
+
+        const [fin] = await tx<{
+          pending_liability_usd_micros: string;
+        }[]>`SELECT pending_liability_usd_micros FROM attempt_financial_state WHERE attempt_id = ${attemptId} FOR UPDATE`;
+
+        if (budget && fin) {
+          const priorAttemptPending = BigInt(fin.pending_liability_usd_micros);
+          if (priorAttemptPending > 0n) {
+            await tx`UPDATE attempt_financial_state
+              SET pending_liability_usd_micros = 0,
+                  updated_at = now()
+              WHERE attempt_id = ${attemptId}`;
+
+            const newFilmPending = BigInt(budget.pending_liability_usd_micros) - priorAttemptPending;
+            await tx`UPDATE film_budget_accounts
+              SET pending_liability_usd_micros = ${newFilmPending >= 0n ? newFilmPending.toString() : '0'},
+                  version = version + 1,
+                  updated_at = now()
+              WHERE film_id = ${filmId}`;
+          }
+        }
+
+        const targetState = result.outcome === 'CONFIRMED_RUNNING' ? 'RUNNING' : 'SUBMITTED';
+        await tx`UPDATE attempts SET state = ${targetState} WHERE id = ${attemptId}`;
+      }
+
+      await tx`UPDATE outbound_dispatches
+        SET state = 'SUBMITTED',
+            updated_at = now()
+        WHERE attempt_id = ${attemptId}
+          AND state = 'SUBMISSION_UNCERTAIN'`;
+    });
   }
 
   return result;
@@ -332,12 +371,37 @@ export async function dispatchAttempt(
     };
   }
 
-  // Persist provider job id
-  await pgClient`UPDATE outbound_dispatches
+  // Persist provider job id via CAS (Compare-And-Swap)
+  // CAS condition: state MUST still be 'SUBMITTING' and claim_token MUST match our token!
+  const [updated] = await pgClient<{ attempt_id: string }[]>`
+    UPDATE outbound_dispatches
     SET state = 'SUBMITTED',
         provider_job_id = ${submission.providerJobId},
         updated_at = now()
-    WHERE attempt_id = ${attemptId}`;
+    WHERE attempt_id = ${attemptId}
+      AND state = 'SUBMITTING'
+      AND claim_token = ${claimToken}
+    RETURNING attempt_id
+  `;
+
+  if (!updated) {
+    // CAS failed! A sweeper or concurrent actor transitioned this row (e.g. to SUBMISSION_UNCERTAIN).
+    // Invariant (G3-B): Never blindly overwrite outbound_dispatches to SUBMITTED while attempts is SUBMISSION_UNCERTAIN!
+    // Instead, attach the confirmed provider_job_id to outbound_dispatches and route directly into reconciliation.
+    await pgClient`
+      UPDATE outbound_dispatches
+      SET provider_job_id = ${submission.providerJobId},
+          updated_at = now()
+      WHERE attempt_id = ${attemptId}
+    `;
+
+    const recResult = await reconcileUncertainDispatch(attemptId, adapter);
+
+    return {
+      outcome: 'SUBMISSION_UNCERTAIN',
+      reason: `CAS lost to concurrent transition; reconciled with provider_job_id ${submission.providerJobId} (outcome: ${recResult.outcome})`,
+    };
+  }
 
   // Crash point 3: after submit persist
   if (options?.simulateCrashAt === 'AFTER_SUBMIT') {
