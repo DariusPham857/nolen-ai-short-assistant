@@ -15,6 +15,7 @@ import { createFilmApi } from "./http/film-api.js";
 import { installBoundary } from './http/boundary.js';
 import { createStoryApi } from './http/story-api.js';
 import { createFinancialApi } from './http/financial-api.js';
+import { createAssetApi } from './http/asset-api.js';
 export const app = new Hono();
 installBoundary(app);
 
@@ -23,6 +24,7 @@ app.use("*", logger());
 app.route("/", createFilmApi());
 app.route("/", createStoryApi());
 app.route("/", createFinancialApi());
+app.route("/", createAssetApi());
 
 // ── Routes ──────────────────────────────────────────────
 app.route("/api/health", healthRoutes);

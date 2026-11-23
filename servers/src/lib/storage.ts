@@ -32,13 +32,18 @@ export class StorageAdapter {
     this.basePath = basePath ?? getEnv().STORAGE_BASE_PATH;
   }
 
-  /** Resolve a path within a category directory. */
+  /** Resolve a path within a category directory with OWASP path containment check. */
   resolve(category: AssetCategory, filename: string): string {
     const dir = path.resolve(this.basePath, category);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    return path.join(dir, filename);
+    const target = path.resolve(dir, filename);
+    const rel = path.relative(dir, target);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`Path containment violation: ${filename}`);
+    }
+    return target;
   }
 
   /** Write data to storage and return its SHA-256 hash. */
