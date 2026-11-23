@@ -26,12 +26,12 @@ Baseline: `main@3e8ab8f` (PR #10 merged). Feature work is implemented and verifi
 
 - `packages/contracts/src/assets.ts`: asset, review, and selection DTO schemas (`AssetDto`, `ReviewAsset`, `ShotAssetSelectionDto`).
 - `packages/contracts/src/assets.test.ts`: 4 unit tests covering enum parsing, non-negative string byte sizes, SHA-256 validation, review reasons, and DTO parsing.
-- `servers/src/db/schema/assets.ts`: `assets`, `asset_reviews`, and `shot_asset_selections` tables with composite foreign keys and indexes.
-- `servers/src/db/migrations/0004_faulty_captain_stacy.sql` & `meta/state-5.json`: additive schema migration 0004 with catalog snapshot state-5, composite foreign keys, and `kf_asset_reviews_append_only` trigger.
+- `servers/src/db/schema/assets.ts`: `assets`, `asset_reviews`, and `shot_asset_selections` tables with composite unique constraints and composite foreign keys enforcing revision and kind compatibility.
+- `servers/src/db/migrations/0004_faulty_captain_stacy.sql` & `meta/state-5.json`: additive schema migration 0004 with catalog snapshot state-5, composite foreign keys (`(film_id, asset_id, shot_revision_id)` on `asset_reviews` and `(film_id, asset_id, shot_revision_id, kind)` on `shot_asset_selections`), and `kf_asset_reviews_append_only` trigger.
 - `servers/src/assets/repository.ts`: asset persistence with attempt provenance enforcement, SHA-256 storage verification, authenticated media locator, optimistic review concurrency, and active selection state.
 - `servers/src/http/asset-api.ts`: `/api/films/:filmId/shots/:shotId/assets`, `/api/assets/:assetId/review`, and `/api/assets/:assetId/media` (operator authenticated and film-scoped).
-- `servers/src/financial/repository.ts`: deterministic keyframe gating in `admitAttempt` with `FOR UPDATE OF f` row lock and storage integrity revalidation before VIDEO dispatch.
-- `servers/src/assets/assets.integration.test.ts`: acceptance test suite covering KF-AT-01 through KF-AT-10 plus KF-BLOCK-1 through KF-BLOCK-4 against PostgreSQL 16.
+- `servers/src/financial/repository.ts`: deterministic keyframe gating in `admitAttempt` with `FOR UPDATE OF f` row lock, storage integrity revalidation, and defense-in-depth revision/kind join checks before VIDEO dispatch.
+- `servers/src/assets/assets.integration.test.ts`: acceptance test suite covering KF-AT-01 through KF-AT-10 plus KF-BLOCK-1 through KF-BLOCK-5 against PostgreSQL 16.
 - `clients/components/keyframe-review.tsx`: Producer keyframe review workstation modal with 9:16 preview, status badges, and approve/reject flow.
 - `clients/components/storyboard.tsx`: Keyframe review button and modal integrated into Shot Inspector.
 
@@ -44,10 +44,10 @@ Baseline: `main@3e8ab8f` (PR #10 merged). Feature work is implemented and verifi
 - `pnpm check:evidence`: PASS (26 engineering documents)
 - `pnpm test:evidence`: PASS (4/4 tests)
 - Vitest integration tests against real PostgreSQL 16:
-  - `src/assets/assets.integration.test.ts`: 14/14 PASS (KF-AT-01 to KF-AT-10, KF-BLOCK-1 to KF-BLOCK-4)
+  - `src/assets/assets.integration.test.ts`: 15/15 PASS (KF-AT-01 to KF-AT-10, KF-BLOCK-1 to KF-BLOCK-5)
   - `src/db/migrate.integration.test.ts`: 8/8 PASS (including migration 0004 & state-5 upgrade tests)
   - `src/financial/financial.integration.test.ts`: 11/11 PASS
   - `src/stories/story.integration.test.ts`: 10/10 PASS
   - `src/films/film.integration.test.ts`: 7/7 PASS
   - `src/routes/health.integration.test.ts`: 1/1 PASS
-  - Total: 51/51 integration tests PASSED.
+  - Total: 52/52 integration tests PASSED.

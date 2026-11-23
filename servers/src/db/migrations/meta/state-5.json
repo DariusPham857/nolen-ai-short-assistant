@@ -1898,9 +1898,9 @@
     },
     {
       "relname": "asset_reviews",
-      "conname": "asset_reviews_film_id_asset_id_assets_film_id_id_fk",
+      "conname": "asset_reviews_film_id_asset_id_shot_revision_id_assets_film_id_",
       "contype": "f",
-      "definition": "FOREIGN KEY (film_id, asset_id) REFERENCES assets(film_id, id)"
+      "definition": "FOREIGN KEY (film_id, asset_id, shot_revision_id) REFERENCES assets(film_id, id, shot_revision_id)"
     },
     {
       "relname": "asset_reviews",
@@ -1949,6 +1949,18 @@
       "conname": "assets_film_id_films_id_fk",
       "contype": "f",
       "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_id_shot_revision_id_kind_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_id_shot_revision_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id, shot_revision_id)"
     },
     {
       "relname": "assets",
@@ -2318,9 +2330,9 @@
     },
     {
       "relname": "shot_asset_selections",
-      "conname": "shot_asset_selections_film_id_asset_id_assets_film_id_id_fk",
+      "conname": "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_as",
       "contype": "f",
-      "definition": "FOREIGN KEY (film_id, asset_id) REFERENCES assets(film_id, id)"
+      "definition": "FOREIGN KEY (film_id, asset_id, shot_revision_id, kind) REFERENCES assets(film_id, id, shot_revision_id, kind)"
     },
     {
       "relname": "shot_asset_selections",
@@ -2560,6 +2572,16 @@
       "tablename": "assets",
       "indexname": "assets_attempt_id_unique",
       "indexdef": "CREATE UNIQUE INDEX assets_attempt_id_unique ON public.assets USING btree (attempt_id)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_film_id_id_shot_revision_id_kind_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_shot_revision_id_kind_unique ON public.assets USING btree (film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_film_id_id_shot_revision_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_shot_revision_id_unique ON public.assets USING btree (film_id, id, shot_revision_id)"
     },
     {
       "tablename": "assets",

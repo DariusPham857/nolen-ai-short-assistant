@@ -147,6 +147,9 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
           SELECT s.asset_id, a.storage_path, a.sha256_hash
           FROM shot_asset_selections s
           JOIN assets a ON a.id = s.asset_id
+            AND a.film_id = s.film_id
+            AND a.shot_revision_id = s.shot_revision_id
+            AND a.kind = s.kind
           JOIN (
             SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision
             FROM asset_reviews r
@@ -158,6 +161,8 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
             AND s.kind = 'IMAGE'
             AND s.shot_revision_id = ${input.shotRevisionId}
             AND a.film_id = ${filmId}
+            AND a.shot_revision_id = ${input.shotRevisionId}
+            AND a.kind = 'IMAGE'
             AND a.verified = true
             AND lr.decision = 'APPROVED'
           LIMIT 1

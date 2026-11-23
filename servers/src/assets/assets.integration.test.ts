@@ -767,4 +767,71 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       pgClient`DELETE FROM asset_reviews WHERE id = ${reviewId}`,
     ).rejects.toThrow('KF_APPEND_ONLY');
   });
+
+  it('KF-BLOCK-5: Selection and review cannot link an asset to a mismatched shot revision or kind', async () => {
+    const f = await createFixture();
+
+    // Setup Shot B in the same story revision
+    const shotBId = randomUUID();
+    const shotRevBId = randomUUID();
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotBId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevBId}, ${f.filmId}, ${shotBId}, '{"prompt":"Shot B"}'::jsonb, 'dep-b', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${f.sceneId}, ${shotBId}, ${shotRevBId}, 2)`;
+    });
+
+    // Create and approve image keyframe asset for Shot A
+    const imgResA = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId: attemptAId } = await imgResA.json() as { attemptId: string };
+    const assetA = await fakeAssetProducer({ filmId: f.filmId, attemptId: attemptAId, shotRevisionId: f.shotRevisionId });
+
+    await request(`/api/assets/${assetA.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+
+    // 5A. Direct insert into asset_reviews with assetA but shotRevBId must be rejected by composite FK
+    await expect(
+      pgClient`
+        INSERT INTO asset_reviews (id, asset_id, film_id, shot_revision_id, actor_id, decision, reason)
+        VALUES (${randomUUID()}, ${assetA.id}, ${f.filmId}, ${shotRevBId}, 'local-operator', 'APPROVED', '')
+      `,
+    ).rejects.toThrow();
+
+    // 5B. Direct insert into shot_asset_selections for Shot B with assetA and shotRevBId must be rejected by composite FK
+    await expect(
+      pgClient`
+        INSERT INTO shot_asset_selections (story_revision_id, shot_id, kind, shot_revision_id, asset_id, film_id, selected_by)
+        VALUES (${f.storyRevisionId}, ${shotBId}, 'IMAGE', ${shotRevBId}, ${assetA.id}, ${f.filmId}, 'local-operator')
+      `,
+    ).rejects.toThrow();
+
+    // 5C. Direct insert into shot_asset_selections with mismatched kind ('VIDEO' for image asset) must be rejected by composite FK
+    await expect(
+      pgClient`
+        INSERT INTO shot_asset_selections (story_revision_id, shot_id, kind, shot_revision_id, asset_id, film_id, selected_by)
+        VALUES (${f.storyRevisionId}, ${f.shotId}, 'VIDEO', ${f.shotRevisionId}, ${assetA.id}, ${f.filmId}, 'local-operator')
+      `,
+    ).rejects.toThrow();
+
+    // 5D. VIDEO admission for Shot B must fail with KEYFRAME_APPROVAL_REQUIRED (Shot A's keyframe cannot unlock Shot B)
+    const vidResB = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: shotRevBId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(vidResB.status).toBe(409);
+    expect(((await vidResB.json()) as { error: { code: string } }).error.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
+  });
 });
