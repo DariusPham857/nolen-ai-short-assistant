@@ -1,7 +1,9 @@
 # FI-001 — Financial Ledger & Atomic Budget Admission (G2)
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: G2_ACCEPTED
 Source: [PRD v1.0 §17](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
+
+**Status:** `G2_ACCEPTED` — PR #8, #9, and #10 merged, merge CI passed, independent acceptance found no BLOCK, and the project owner accepted G2 on 2026-11-22
 
 ## Goal
 

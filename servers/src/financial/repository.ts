@@ -130,9 +130,40 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       FOR UPDATE OF f`;
     if(!story)throw new ApiFailure(409,'CURRENT_APPROVAL_REQUIRED','Attempt requires the active StoryRevision with current approval evidence');
     if(['IMAGE','VIDEO'].includes(input.kind) && !input.shotRevisionId)throw new ApiFailure(422,'SHOT_REVISION_REQUIRED','Image and video attempts require a ShotRevision');
+    let shotId: string | null = null;
     if(input.shotRevisionId){
-      const [shot]=await tx<{id:string}[]>`SELECT sr.id FROM shot_revisions sr JOIN story_revision_shots m ON m.film_id=sr.film_id AND m.shot_revision_id=sr.id WHERE sr.id=${input.shotRevisionId} AND sr.film_id=${filmId} AND m.story_revision_id=${input.storyRevisionId}`;
+      const [shot]=await tx<{id:string;shot_id:string}[]>`SELECT sr.id, m.shot_id FROM shot_revisions sr JOIN story_revision_shots m ON m.film_id=sr.film_id AND m.shot_revision_id=sr.id WHERE sr.id=${input.shotRevisionId} AND sr.film_id=${filmId} AND m.story_revision_id=${input.storyRevisionId}`;
       if(!shot)throw new ApiFailure(422,'SHOT_REVISION_MISMATCH','ShotRevision is not part of the approved StoryRevision');
+      shotId = shot.shot_id;
+    }
+    if (input.kind === 'VIDEO') {
+      const [sr] = await tx<{ policy: { effectiveRequirement?: string; ruleTier?: string } | null }[]>`SELECT policy FROM shot_revisions WHERE id=${input.shotRevisionId} AND film_id=${filmId}`;
+      const policyReq = (sr?.policy as { effectiveRequirement?: string } | null)?.effectiveRequirement;
+      const isRequired = policyReq ? policyReq === 'REQUIRED' : true;
+      if (isRequired) {
+        const [approvedKeyframe] = await tx<{ asset_id: string }[]>`
+          SELECT s.asset_id
+          FROM shot_asset_selections s
+          JOIN assets a ON a.id = s.asset_id
+          JOIN (
+            SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision
+            FROM asset_reviews r
+            WHERE r.film_id = ${filmId}
+            ORDER BY r.asset_id, r.created_at DESC, r.id DESC
+          ) lr ON lr.asset_id = s.asset_id
+          WHERE s.story_revision_id = ${input.storyRevisionId}
+            AND s.shot_id = ${shotId}
+            AND s.kind = 'IMAGE'
+            AND s.shot_revision_id = ${input.shotRevisionId}
+            AND a.film_id = ${filmId}
+            AND a.verified = true
+            AND lr.decision = 'APPROVED'
+          LIMIT 1
+        `;
+        if (!approvedKeyframe) {
+          throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
+        }
+      }
     }
     const rate=await loadRate(tx,input.rateCardSnapshotId);
     if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');

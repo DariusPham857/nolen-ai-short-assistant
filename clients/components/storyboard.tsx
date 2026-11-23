@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { expectedSchema, filmDtoSchema, formatMicros, saveStorySchema, storyContentSchema, type Expected, type Storyboard, type StoryContent, type ShotSpec } from '@nolen/contracts';
 import { Button } from './ui/button';
 import { Navigation } from './navigation';
+import { KeyframeReviewModal } from './keyframe-review';
 import { errorMessage } from '../lib/api';
 
 type Pending={key:string;route:string;body:unknown};
@@ -33,6 +34,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const [budget,setBudget]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [dirty,setDirty]=useState(false);
   const [pending,setPending]=useState<Pending|null>(null);const [storageBlocked,setStorageBlocked]=useState(false);const [historical,setHistorical]=useState(false);
   const [selected,setSelected]=useState({scene:0,shot:0});const [proposal,setProposal]=useState(false);
+  const [keyframeModalOpen,setKeyframeModalOpen]=useState(false);
 
   /** Reload authoritative state; populate expected Shot tokens for subsequent full-snapshot save. */
   async function load(revisionId?:string,restore=false){
@@ -138,7 +140,19 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
         <label className="block text-sm">Shot type<select className={inputClass} value={shot.spec.shotType} onChange={e=>updateShot(s=>{s.shotType=e.target.value as ShotSpec['shotType'];})}>{['CHARACTER','ACTION','DIALOGUE','ESTABLISHING','BROLL','INSERT','PRODUCT','OTHER'].map(t=><option key={t}>{t}</option>)}</select></label>
         <Field label="Camera framing" value={shot.spec.camera.framing} onChange={v=>updateShot(s=>{s.camera.framing=v;})}/><Field label="Camera movement" value={shot.spec.camera.movement} onChange={v=>updateShot(s=>{s.camera.movement=v;})}/>
         {(['locationId','styleRefId'] as const).map(field=><label key={field} className="block text-sm">{field==='locationId'?'Shot location':'Visual style'}<select className={inputClass} value={shot.spec[field]} onChange={e=>updateShot(s=>{s[field]=e.target.value;if(field==='locationId'){s.continuity.start.locationId=e.target.value;s.continuity.end.locationId=e.target.value;}})}>{content.storyBible[field==='locationId'?'locations':'styleRefs'].map(d=><option value={d.id} key={d.id}>{d.name}</option>)}</select></label>)}
-        <p className="text-sm text-zinc-400">Keyframe: {board?.revision?.shotRevisions[shot.id??'']?.policy.effectiveRequirement??'Classified on save'}</p>
+        <div className="space-y-1">
+          <p className="text-sm text-zinc-400">Keyframe: {board?.revision?.shotRevisions[shot.id??'']?.policy.effectiveRequirement??'Classified on save'}</p>
+          {shot.id && board?.revision && (
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setKeyframeModalOpen(true)}
+              className="w-full text-xs h-8 border-amber-600/50 text-amber-300 hover:bg-amber-950/40"
+            >
+              Review Keyframes & Assets
+            </Button>
+          )}
+        </div>
         <label className="block text-sm"><input type="checkbox" checked={Boolean(shot.spec.keyframeOverride)} onChange={e=>updateShot(s=>{s.keyframeOverride=e.target.checked?{requirement:'REQUIRED',reason:'',riskAcknowledged:true}:null;})}/> Explicit keyframe policy override (acknowledge risk)</label>
         {shot.spec.keyframeOverride&&<><label className="block text-sm">Override requirement<select className={inputClass} value={shot.spec.keyframeOverride.requirement} onChange={e=>updateShot(s=>{if(s.keyframeOverride)s.keyframeOverride.requirement=e.target.value as 'REQUIRED'|'OPTIONAL';})}><option>REQUIRED</option><option>OPTIONAL</option></select></label><Field label="Override reason" value={shot.spec.keyframeOverride.reason} onChange={v=>updateShot(s=>{if(s.keyframeOverride)s.keyframeOverride.reason=v;})}/></>}
         <h3 className="font-semibold">Intentional transition from preceding shot</h3>
@@ -162,5 +176,16 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
     </fieldset>}
     <section className="mt-8 border-t border-zinc-800 py-5"><h2 className="font-semibold mb-3">Validation and approval evidence</h2>{historicalValidation&&<p role="status" className="text-amber-300">Historical evidence uses {board?.validation?.ruleSetVersion}; current G1 requires {board?.currentRuleSetVersion}. Create and approve a successor revision for current acceptance.</p>}{board?.validation?.findings.length===0&&!historicalValidation&&<p>No blocking findings under {board.currentRuleSetVersion}.</p>}{board?.validation?.findings.map(f=><div key={f.fingerprint} className="my-3 text-sm"><p className={f.severity==='ERROR'?'text-rose-300':'text-amber-300'}>{f.severity}: {f.message}</p><p className="text-zinc-500">{f.path}</p>{board.waivers.some(w=>w.findingFingerprint===f.fingerprint)?<p>Waived with producer reason.</p>:f.waivable&&<Button variant="outline" disabled={disabled||dirty||!['PLANNED','IN_REVIEW'].includes(board.active?.state??'')} onClick={()=>{const reason=window.prompt('Reason for accepting this wardrobe/held-prop mismatch');if(reason?.trim())mutate('waivers',{...token,findingFingerprint:f.fingerprint,reason});}}>Waive finding</Button>}</div>)}{board?.approval&&<p className={historicalValidation?'text-amber-300':'text-emerald-300'}>Approval recorded for revision {board.revision?.revisionNo}. {historicalValidation?'This remains historical audit evidence only.':'Evidence is bound to this content, waiver set, and current ruleset.'}</p>}</section>
     <section className="border-t border-zinc-800 py-5"><h2 className="font-semibold mb-3">Revision history</h2><div className="flex gap-2 flex-wrap">{board?.history.map(r=><Button key={r.id} variant="outline" disabled={busy||dirty||Boolean(pending)} onClick={()=>void load(r.id).catch(()=>setError('Unable to read history.'))}>Revision {r.revisionNo} · {r.state}</Button>)}</div></section>
+    {shot?.id && board?.revision?.shotRevisions[shot.id] && (
+      <KeyframeReviewModal
+        filmId={filmId}
+        shotId={shot.id}
+        shotRevisionId={board.revision.shotRevisions[shot.id].id}
+        keyframeRequirement={board.revision.shotRevisions[shot.id].policy.effectiveRequirement}
+        isOpen={keyframeModalOpen}
+        onClose={() => setKeyframeModalOpen(false)}
+        onReviewSubmitted={() => void load()}
+      />
+    )}
   </div>;
 }
