@@ -1964,6 +1964,12 @@
     },
     {
       "relname": "assets",
+      "conname": "assets_film_shot_kind_attempt_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id, kind, attempt_id) REFERENCES attempts(film_id, shot_revision_id, kind, id)"
+    },
+    {
+      "relname": "assets",
       "conname": "assets_pkey",
       "contype": "p",
       "definition": "PRIMARY KEY (id)"
@@ -2021,6 +2027,12 @@
       "conname": "attempts_film_id_films_id_fk",
       "contype": "f",
       "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_film_id_shot_revision_id_kind_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, shot_revision_id, kind, id)"
     },
     {
       "relname": "attempts",
@@ -2566,6 +2578,11 @@
     },
     {
       "tablename": "attempts",
+      "indexname": "attempts_film_id_shot_revision_id_kind_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX attempts_film_id_shot_revision_id_kind_id_unique ON public.attempts USING btree (film_id, shot_revision_id, kind, id)"
+    },
+    {
+      "tablename": "attempts",
       "indexname": "attempts_pkey",
       "indexdef": "CREATE UNIQUE INDEX attempts_pkey ON public.attempts USING btree (id)"
     },
@@ -2794,6 +2811,12 @@
   ],
   "triggers": [
     {
+      "relname": "asset_reviews",
+      "tgname": "kf_asset_reviews_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER kf_asset_reviews_append_only BEFORE DELETE OR UPDATE ON public.asset_reviews FOR EACH ROW EXECUTE FUNCTION kf_guard_append_only()"
+    },
+    {
       "relname": "budget_limit_events",
       "tgname": "fi_budget_limit_events_append_only",
       "tgenabled": "O",
@@ -2888,6 +2911,10 @@
     {
       "proname": "fi_guard_append_only",
       "definition": "CREATE OR REPLACE FUNCTION public.fi_guard_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'FI_APPEND_ONLY'; END $function$\n"
+    },
+    {
+      "proname": "kf_guard_append_only",
+      "definition": "CREATE OR REPLACE FUNCTION public.kf_guard_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'KF_APPEND_ONLY'; END $function$\n"
     },
     {
       "proname": "sp_guard_immutable",

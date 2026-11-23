@@ -23,6 +23,10 @@ export const assets = pgTable('assets', {
     columns: [table.filmId, table.shotRevisionId],
     foreignColumns: [shotRevisions.filmId, shotRevisions.id],
   }),
+  foreignKey({
+    columns: [table.filmId, table.shotRevisionId, table.kind, table.attemptId],
+    foreignColumns: [attempts.filmId, attempts.shotRevisionId, attempts.kind, attempts.id],
+  }),
   check('asset_kind_valid', sql`${table.kind} IN ('IMAGE', 'VIDEO')`),
   check('asset_byte_size_nonnegative', sql`${table.byteSize} >= 0`),
 ]);

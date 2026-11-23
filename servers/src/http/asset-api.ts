@@ -26,7 +26,8 @@ export function createAssetApi() {
 
   api.get('/api/assets/:assetId/media', async c => {
     const assetId = resourceId(c.req.param('assetId'));
-    const { buffer, mimeType, byteSize, sha256 } = await getAssetMedia(assetId);
+    const operatorId = await requireOperator(c);
+    const { buffer, mimeType, byteSize, sha256 } = await getAssetMedia(assetId, operatorId);
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {

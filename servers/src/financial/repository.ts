@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type postgres from 'postgres';
 import type { CreateAttempt, EstimateAttempt, ReconcileAttempt, UpdateBudget } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { ApiFailure } from '../http/errors.js';
 import { RULESET } from '../stories/domain.js';
+import { storage, type AssetCategory } from '../lib/storage.js';
 import { add, assertAdmission, estimate, projection, subtract, type Projection, type Rate } from './domain.js';
 
 type Tx = postgres.TransactionSql;
@@ -141,8 +143,8 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       const policyReq = (sr?.policy as { effectiveRequirement?: string } | null)?.effectiveRequirement;
       const isRequired = policyReq ? policyReq === 'REQUIRED' : true;
       if (isRequired) {
-        const [approvedKeyframe] = await tx<{ asset_id: string }[]>`
-          SELECT s.asset_id
+        const [approvedKeyframe] = await tx<{ asset_id: string; storage_path: string; sha256_hash: string }[]>`
+          SELECT s.asset_id, a.storage_path, a.sha256_hash
           FROM shot_asset_selections s
           JOIN assets a ON a.id = s.asset_id
           JOIN (
@@ -162,6 +164,21 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
         `;
         if (!approvedKeyframe) {
           throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
+        }
+
+        const category: AssetCategory = approvedKeyframe.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
+        const filename = path.basename(approvedKeyframe.storage_path);
+        if (!storage.exists(category, filename)) {
+          throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset missing from storage');
+        }
+        let verifiedOnDisk = false;
+        try {
+          verifiedOnDisk = await storage.verify(category, filename, approvedKeyframe.sha256_hash);
+        } catch {
+          verifiedOnDisk = false;
+        }
+        if (!verifiedOnDisk) {
+          throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset failed disk integrity check');
         }
       }
     }
