@@ -7,7 +7,7 @@ Source: [spec](spec.md)
 
 | Task | Tier | Scope & Dependency | Goal / Deliverable | Verification / Acceptance |
 |---|---|---|---|---|
-| PD-01 | R1 | REQUIRED | Zod provider contracts, dispatch schemas & adapter interface | `pnpm check:evidence`, `@nolen/contracts` unit tests |
+| PD-01 | R1 | REQUIRED | Zod provider contracts, dispatch schemas & adapter interface | PASS: 4/4 unit tests, typecheck clean, commit `2b419d5` |
 | PD-02 | R1 | REQUIRED | Fake provider adapters (Gemini, Runway, fal.ai) & SSRF validator | Unit & security containment tests (PD-AT-07) |
 | PD-03 | R0 | REQUIRED | `outbound_dispatches` table & bounded outbox relay backoff | Drizzle migration, relay unit tests (PD-AT-08) |
 | PD-04 | R0 | REQUIRED | Worker crash recovery & submission uncertainty hold | PG16 integration tests (PD-AT-03, PD-AT-04, PD-AT-05, PD-AT-06) |
