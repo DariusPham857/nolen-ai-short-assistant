@@ -164,6 +164,7 @@ Agents and contributors working on this codebase MUST uphold these core rules at
 - Follow [Plan, Scope, Task Breakdown & Handoff](.agents/rules/plan-breakdown-handoff.md), the canonical workflow.
 - Follow [Engineering Exceptions & Review](.agents/rules/engineering-exceptions.md), the canonical workaround/debt policy.
 - [ENG-DEC-001](docs/development/ENG-DEC-001.md) defines source ownership and evidence statuses. Other documents reference canonical rules rather than redefining them.
+- [ENG-DEC-002](docs/development/ENG-DEC-002.md) and [Risk-Based TDD & Lightweight AMDD](.agents/rules/risk-based-tdd-amdd.md) define the R0/R1/R2 test-first tiers and modeling standards for behavioral changes.
 - Use [feature specs](specs/README.md) and the single [debt tracker](docs/DEBT.md).
 
 ---

@@ -1,6 +1,6 @@
 # FI-001 tasks
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: G2_ACCEPTED
 Source: [approved specification](spec.md)
 
 ## Tasks
@@ -82,5 +82,4 @@ Baseline: `main@b2b16ff` (PR #8 merged). Correctness remediation v2 is isolated 
 Read-only diff/caller/test review found no BLOCK or accepted CONTAIN exception. Queue
 delivery is not provider submission or billing evidence. `AT-P02-11`, `AT-P02-18` and
 `AT-P02-20` remain explicitly partial until G3/provider and benchmark work. CI evidence
-is verified on PR #9 final HEAD and PR #10; owner sign-off is external. Final status cannot exceed
-`IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF` without owner acceptance.
+is verified on PR #9 final HEAD and PR #10. Owner acceptance is confirmed and signed off on 2026-11-22: `G2_ACCEPTED`.

@@ -15,7 +15,7 @@ objective. 100–150 lines, 2–3 files and multiple layers are review signals, 
 hard limits. Split independent goals or changes too large to review, keeping each
 step valid and verifiable. Do not separate a behavior change from its tests.
 Example: validation + tests → persistence + PG tests → API + contract tests → UI + E2E.
-Use TDD for risky business logic and bug fixes. Preserve product invariants.
+For behavioral changes, follow [Risk-Based TDD & Lightweight AMDD](risk-based-tdd-amdd.md) (R0/R1/R2) per [ENG-DEC-002](../../docs/development/ENG-DEC-002.md). Use TDD for risky business logic and bug fixes. Preserve product invariants.
 Execute approved tasks without repeatedly seeking approval for routine choices.
 
 ## Handoff
