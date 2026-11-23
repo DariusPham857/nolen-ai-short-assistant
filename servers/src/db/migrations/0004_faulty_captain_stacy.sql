@@ -55,7 +55,7 @@ ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_story_
 ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_assets_film_id_id_shot_revision_id_kind_fk" FOREIGN KEY ("film_id","asset_id","shot_revision_id","kind") REFERENCES "public"."assets"("film_id","id","shot_revision_id","kind") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shot_asset_selections" ADD CONSTRAINT "shot_asset_selections_film_id_shot_revision_id_shot_revisions_film_id_id_fk" FOREIGN KEY ("film_id","shot_revision_id") REFERENCES "public"."shot_revisions"("film_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "attempts" ADD CONSTRAINT "attempts_film_id_shot_revision_id_kind_id_unique" UNIQUE("film_id","shot_revision_id","kind","id");--> statement-breakpoint
-ALTER TABLE "assets" ADD CONSTRAINT "assets_film_shot_kind_attempt_fk" FOREIGN KEY ("film_id","shot_revision_id","kind","attempt_id") REFERENCES "public"."attempts"("film_id","shot_revision_id","kind","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "assets" ADD CONSTRAINT "assets_film_id_shot_revision_id_kind_attempt_id_attempts_film_id_shot_revision_id_kind_id_fk" FOREIGN KEY ("film_id","shot_revision_id","kind","attempt_id") REFERENCES "public"."attempts"("film_id","shot_revision_id","kind","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "asset_reviews_latest_idx" ON "asset_reviews" USING btree ("asset_id","created_at","id");--> statement-breakpoint
 CREATE FUNCTION kf_guard_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'KF_APPEND_ONLY'; END $$;--> statement-breakpoint
