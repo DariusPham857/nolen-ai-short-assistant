@@ -524,5 +524,27 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       expect(res.status).toBe(422);
     }
   });
+
+  it('EP-05: GET /api/rate-cards requires operator and is strictly read-only', async () => {
+    // 1. Without operator cookie -> 401
+    const unauthed = await api.request('http://127.0.0.1:3000/api/rate-cards', {
+      method: 'GET',
+      headers: { Origin: 'http://127.0.0.1:3000' },
+    });
+    expect(unauthed.status).toBe(401);
+
+    // 2. Count existing snapshots before
+    const [countBefore] = await pgClient<{ count: string }[]>`SELECT count(*)::text FROM rate_card_snapshots`;
+
+    // 3. Authenticated request -> 200 array
+    const authed = await request('/api/rate-cards', 'GET');
+    expect(authed.status).toBe(200);
+    const cards = await authed.json() as { id: string; provider: string; model: string; operation: string; rateType: string; unitPriceUsdMicros: string }[];
+    expect(Array.isArray(cards)).toBe(true);
+
+    // 4. Verify strictly read-only: count after MUST match count before
+    const [countAfter] = await pgClient<{ count: string }[]>`SELECT count(*)::text FROM rate_card_snapshots`;
+    expect(countAfter.count).toBe(countBefore.count);
+  });
 });
 

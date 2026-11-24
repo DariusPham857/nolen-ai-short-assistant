@@ -13,7 +13,10 @@ function requiredKey(value:string|undefined):string {
 /** Financial Core routes share the FC/SP security and error boundary. */
 export function createFinancialApi(){
   const api=new Hono();installBoundary(api);
-  api.get('/api/rate-cards',async c=>c.json(await listRateCards()));
+  api.get('/api/rate-cards',async c=>{
+    await requireOperator(c);
+    return c.json(await listRateCards());
+  });
   api.get('/api/films/:filmId/budget',async c=>c.json(await readBudget(resourceId(c.req.param('filmId')),await requireOperator(c))));
   api.post('/api/films/:filmId/budget/estimate',async c=>c.json(await estimateAttempt(resourceId(c.req.param('filmId')),await requireOperator(c),estimateAttemptSchema.parse(await boundedJson(c.req.raw,16384)))));
   api.patch('/api/films/:filmId/budget',async c=>c.json(await changeBudget(resourceId(c.req.param('filmId')),await requireOperator(c),requiredKey(c.req.header('Idempotency-Key')),updateBudgetSchema.parse(await boundedJson(c.req.raw,16384)))));

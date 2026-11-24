@@ -347,56 +347,6 @@ export async function auditFinancialProjection(filmId:string, onAfterAccountRead
   });
 }
 
-const DEFAULT_RATE_CARDS = [
-  {
-    id: '00000000-0000-4000-a000-000000000001',
-    provider: 'GEMINI',
-    model: 'gemini-3.1-flash-image',
-    operation: 'IMAGE',
-    rateType: 'FIXED_PER_REQUEST',
-    unitPriceUsdMicros: 20000n,
-  },
-  {
-    id: '00000000-0000-4000-a000-000000000002',
-    provider: 'RUNWAY',
-    model: 'gen4_turbo',
-    operation: 'VIDEO',
-    rateType: 'PER_SECOND',
-    unitPriceUsdMicros: 50000n,
-  },
-  {
-    id: '00000000-0000-4000-a000-000000000003',
-    provider: 'FAL_KLING',
-    model: 'fal-ai/kling-video/v3/pro/image-to-video',
-    operation: 'VIDEO',
-    rateType: 'PER_SECOND',
-    unitPriceUsdMicros: 70000n,
-  },
-  {
-    id: '00000000-0000-4000-a000-000000000004',
-    provider: 'LOCAL_PAN_ZOOM',
-    model: 'ffmpeg-pan-zoom',
-    operation: 'VIDEO',
-    rateType: 'FIXED_PER_REQUEST',
-    unitPriceUsdMicros: 0n,
-  },
-];
-
-export async function ensureDefaultRateCards(): Promise<void> {
-  for (const rc of DEFAULT_RATE_CARDS) {
-    await pgClient`
-      INSERT INTO rate_card_snapshots (
-        id, provider, model, operation, rate_type, unit_price_usd_micros,
-        effective_at, expires_at, source_ref
-      ) VALUES (
-        ${rc.id}, ${rc.provider}, ${rc.model}, ${rc.operation}, ${rc.rateType}, ${rc.unitPriceUsdMicros.toString()},
-        '2026-01-01T00:00:00Z', '2030-01-01T00:00:00Z', 'baseline-rate-cards-2026'
-      )
-      ON CONFLICT (id) DO NOTHING
-    `;
-  }
-}
-
 export async function listRateCards(): Promise<{
   id: string;
   provider: string;
@@ -405,7 +355,6 @@ export async function listRateCards(): Promise<{
   rateType: string;
   unitPriceUsdMicros: string;
 }[]> {
-  await ensureDefaultRateCards();
   const rows = await pgClient<{
     id: string;
     provider: string;

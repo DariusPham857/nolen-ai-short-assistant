@@ -9,6 +9,18 @@ import { VideoReviewModal } from './video-review';
 import { errorMessage } from '../lib/api';
 
 type Pending={key:string;route:string;body:unknown};
+type PendingAttempt={
+  key: string;
+  shotId: string;
+  shotRevisionId: string;
+  storyRevisionId: string;
+  kind: 'IMAGE' | 'VIDEO';
+  provider: string;
+  rateCardSnapshotId: string;
+  pricingUnits: number;
+  executionMode: 'REPLAY' | 'LIVE';
+  createdAt: number;
+};
 const routes=['revisions','mark-planned','submit-review','approve','waivers'];
 const inputClass='w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100';
 /** Small labeled editor reused for creative prose; no implementation fields exposed. */
@@ -29,11 +41,12 @@ function pendingFrom(raw:string):Pending {
 }
 /** Three-pane G1 editor; uncertain commands retain exact payload/key until a definite response. */
 export function StoryboardWorkspace({filmId}:{filmId:string}){
-  const router=useRouter();const base=`/api/films/${filmId}`;const slot=`nolen-story-${filmId}`;
+  const router=useRouter();const base=`/api/films/${filmId}`;const slot=`nolen-story-${filmId}`;const attemptSlot=`nolen-attempt-${filmId}`;
   const [board,setBoard]=useState<Storyboard|null>(null);const [content,setContent]=useState<StoryContent|null>(null);
   const [token,setToken]=useState<Expected>({expectedStoryRevisionId:null,expectedStateVersion:0});
   const [budget,setBudget]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [dirty,setDirty]=useState(false);
-  const [pending,setPending]=useState<Pending|null>(null);const [storageBlocked,setStorageBlocked]=useState(false);const [historical,setHistorical]=useState(false);
+  const [pending,setPending]=useState<Pending|null>(null);const [pendingAttempt,setPendingAttempt]=useState<PendingAttempt|null>(null);
+  const [storageBlocked,setStorageBlocked]=useState(false);const [historical,setHistorical]=useState(false);
   const [selected,setSelected]=useState({scene:0,shot:0});const [proposal,setProposal]=useState(false);
   const [keyframeModalOpen,setKeyframeModalOpen]=useState(false);
   const [videoModalOpen,setVideoModalOpen]=useState(false);
@@ -102,12 +115,19 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   useEffect(()=>{void(async()=>{
     try{
       const raw=sessionStorage.getItem(`${slot}-pending`);if(raw)setPending(pendingFrom(raw));
+      const rawAttempt=sessionStorage.getItem(attemptSlot);
+      if(rawAttempt){
+        try{
+          const parsed=JSON.parse(rawAttempt) as PendingAttempt;
+          if(parsed&&typeof parsed.key==='string'&&parsed.shotId&&parsed.kind)setPendingAttempt(parsed);
+        }catch{}
+      }
       await load(undefined,true);
       const response=await fetch(base,{cache:'no-store'});if(response.ok)setBudget(filmDtoSchema.parse(await response.json()).budgetLimitUsdMicros);
       const rcRes = await fetch('/api/rate-cards', { cache: 'no-store' });
       if (rcRes.ok) setRateCards(await rcRes.json());
     }catch{setStorageBlocked(true);setError('Unable to restore the workspace. Reload or explicitly discard stored state.');}
-  })();},[filmId]);
+  })();},[filmId,attemptSlot]);
 
   /** Draft persistence happens before the next network operation, preserving unsaved work on reload. */
   function edit(change:(draft:StoryContent)=>void){
@@ -153,14 +173,14 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const updateShot=(f:(s:ShotSpec)=>void)=>edit(c=>f(c.scenes[selected.scene].shots[selected.shot].spec));
   const total=content?.scenes.flatMap(s=>s.shots).reduce((n,s)=>n+s.spec.durationSeconds,0)??0;
 
-  async function handleGenerate(kind: 'IMAGE' | 'VIDEO') {
+  async function handleGenerate(kind: 'IMAGE' | 'VIDEO', retryPending?: PendingAttempt) {
     if (!shot?.id || !board?.revision || !board.active) return;
     const shotRev = board.revision.shotRevisions[shot.id];
     if (!shotRev) return;
 
     const currentMedia = shotMediaMap[shot.id] ?? { keyframeApproved: false, videoApproved: false, keyframePending: false, videoPending: false, attemptsCount: 0 };
-    if (kind === 'VIDEO' && shotRev.policy.effectiveRequirement === 'REQUIRED' && !currentMedia.keyframeApproved) {
-      setGenerationError('Keyframe approval is REQUIRED before generating video for this shot.');
+    if (kind === 'VIDEO' && !currentMedia.keyframeApproved) {
+      setGenerationError('All available video providers (Runway I2V, fal Kling I2V, Local Pan/Zoom) require an approved reference keyframe before video generation.');
       return;
     }
 
@@ -168,12 +188,42 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
     setGeneratingProgress('QUEUED');
     setGenerationError(null);
 
-    try {
-      let targetCard = rateCards.find(rc => rc.operation === kind && (kind === 'IMAGE' ? rc.provider === 'GEMINI' : rc.provider === selectedVideoProvider));
-      if (!targetCard) targetCard = rateCards.find(rc => rc.operation === kind);
-      if (!targetCard) throw new Error(`No active rate card found for ${kind}`);
+    let activePending = retryPending;
+    if (!activePending && pendingAttempt && pendingAttempt.shotId === shot.id && pendingAttempt.kind === kind) {
+      activePending = pendingAttempt;
+    }
 
-      const idempotencyKey = crypto.randomUUID();
+    try {
+      const targetProvider = activePending ? activePending.provider : (kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider);
+      const targetCard = rateCards.find(rc => rc.operation === kind && rc.provider === targetProvider);
+      if (!targetCard) {
+        throw new Error(`No active rate card found for provider ${targetProvider} (${kind}). Generation aborted.`);
+      }
+
+      const idempotencyKey = activePending ? activePending.key : crypto.randomUUID();
+      const currentExecutionMode = activePending ? activePending.executionMode : executionMode;
+      const pricingUnits = activePending ? activePending.pricingUnits : (kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1);
+
+      const record: PendingAttempt = {
+        key: idempotencyKey,
+        shotId: shot.id,
+        shotRevisionId: shotRev.id,
+        storyRevisionId: board.active.id,
+        kind,
+        provider: targetProvider,
+        rateCardSnapshotId: targetCard.id,
+        pricingUnits,
+        executionMode: currentExecutionMode,
+        createdAt: activePending ? activePending.createdAt : Date.now(),
+      };
+
+      try {
+        sessionStorage.setItem(attemptSlot, JSON.stringify(record));
+        setPendingAttempt(record);
+      } catch {
+        // Storage unreadable
+      }
+
       const res = await fetch(`${base}/attempts`, {
         method: 'POST',
         headers: {
@@ -181,18 +231,25 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
           'Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
-          storyRevisionId: board.active.id,
-          shotRevisionId: shotRev.id,
-          kind,
-          rateCardSnapshotId: targetCard.id,
-          pricingUnits: kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1,
-          executionMode,
+          storyRevisionId: record.storyRevisionId,
+          shotRevisionId: record.shotRevisionId,
+          kind: record.kind,
+          rateCardSnapshotId: record.rateCardSnapshotId,
+          pricingUnits: record.pricingUnits,
+          executionMode: record.executionMode,
         }),
       });
 
       if (!res.ok) throw new Error(await errorMessage(res));
       const receipt = (await res.json()) as { attemptId: string };
       const attemptId = receipt.attemptId;
+
+      try {
+        sessionStorage.removeItem(attemptSlot);
+        setPendingAttempt(null);
+      } catch {
+        // Ignore
+      }
 
       // Short-poll status
       let finalState = 'QUEUED';
@@ -228,7 +285,10 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const shotRev = shot?.id && board?.revision ? board.revision.shotRevisions[shot.id] : null;
   const isStoryApproved = board?.active?.state === 'APPROVED';
   const isKeyframeRequired = shotRev?.policy.effectiveRequirement === 'REQUIRED';
-  const isVideoBlockedByKeyframe = isKeyframeRequired && !currentMedia.keyframeApproved;
+  // Provider-gated: all current video engines (Runway I2V, fal Kling I2V, Local Pan/Zoom) require an approved keyframe
+  const isVideoBlockedByKeyframe = !currentMedia.keyframeApproved;
+  const activeVideoRateCard = rateCards.find(rc => rc.operation === 'VIDEO' && rc.provider === selectedVideoProvider);
+  const activeImageRateCard = rateCards.find(rc => rc.operation === 'IMAGE' && rc.provider === 'GEMINI');
 
   if(!board&&!error)return <div role="status" className="h-64 animate-pulse bg-zinc-900 rounded">Loading storyboard…</div>;
   return <div data-story-workspace>
@@ -344,11 +404,17 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               </div>
             </div>
 
+            {!activeImageRateCard && (
+              <p className="text-[11px] text-rose-400/90 bg-rose-950/30 border border-rose-900/50 rounded p-1.5">
+                No active rate card for GEMINI (IMAGE). Generation disabled.
+              </p>
+            )}
+
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 type="button"
-                disabled={disabled || !shot.id || !shotRev || Boolean(generatingKind)}
+                disabled={disabled || !shot.id || !shotRev || !activeImageRateCard || Boolean(generatingKind)}
                 onClick={() => void handleGenerate('IMAGE')}
                 className="flex-1 text-xs h-8 border-zinc-700 hover:border-zinc-500"
               >
@@ -408,7 +474,11 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               </p>
             ) : isVideoBlockedByKeyframe ? (
               <p className="text-[11px] text-amber-400/90 bg-amber-950/30 border border-amber-900/50 rounded p-1.5">
-                Keyframe approval is REQUIRED before video generation.
+                An approved keyframe is required before video generation (all available video options are image-driven).
+              </p>
+            ) : !activeVideoRateCard ? (
+              <p className="text-[11px] text-rose-400/90 bg-rose-950/30 border border-rose-900/50 rounded p-1.5">
+                No active rate card for {selectedVideoProvider}. Generation disabled.
               </p>
             ) : null}
 
@@ -422,6 +492,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
                   !shotRev ||
                   !isStoryApproved ||
                   isVideoBlockedByKeyframe ||
+                  !activeVideoRateCard ||
                   Boolean(generatingKind)
                 }
                 onClick={() => void handleGenerate('VIDEO')}
@@ -441,6 +512,53 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               )}
             </div>
           </div>
+
+          {/* Preserved Pending / Uncertain Attempt Recovery Widget */}
+          {pendingAttempt && pendingAttempt.shotId === shot.id && (
+            <div className="p-2.5 rounded bg-amber-950/50 border border-amber-700/80 text-xs space-y-1.5" data-testid="pending-attempt-banner">
+              <div className="flex justify-between items-start">
+                <span className="font-semibold text-amber-300">
+                  Uncertain Attempt ({pendingAttempt.kind} · {pendingAttempt.provider})
+                </span>
+                <span className="text-[10px] font-mono text-amber-400/80 bg-amber-900/60 px-1 py-0.5 rounded border border-amber-700/60">
+                  RETRY KEY PRESERVED
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-300">
+                A prior attempt dispatch may have committed. Retry to preserve the exact request identity without duplicate billing.
+              </p>
+              <p className="text-[10px] text-zinc-400 font-mono break-all">
+                Key: {pendingAttempt.key}
+              </p>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={Boolean(generatingKind)}
+                  onClick={() => void handleGenerate(pendingAttempt.kind, pendingAttempt)}
+                  className="flex-1 text-xs h-7 border-amber-600 text-amber-300 hover:bg-amber-900/50"
+                >
+                  Retry same attempt
+                </Button>
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={Boolean(generatingKind)}
+                  onClick={() => {
+                    if (window.confirm('Discard pending attempt record? An uncertain request may already have committed on the ledger.')) {
+                      try {
+                        sessionStorage.removeItem(attemptSlot);
+                      } catch {}
+                      setPendingAttempt(null);
+                    }
+                  }}
+                  className="text-xs h-7 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                >
+                  Discard
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Active Generation Status / Error */}
           {generatingKind && (
