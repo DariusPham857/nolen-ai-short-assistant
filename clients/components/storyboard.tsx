@@ -5,6 +5,7 @@ import { expectedSchema, filmDtoSchema, formatMicros, saveStorySchema, storyCont
 import { Button } from './ui/button';
 import { Navigation } from './navigation';
 import { KeyframeReviewModal } from './keyframe-review';
+import { VideoReviewModal } from './video-review';
 import { errorMessage } from '../lib/api';
 
 type Pending={key:string;route:string;body:unknown};
@@ -35,6 +36,52 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const [pending,setPending]=useState<Pending|null>(null);const [storageBlocked,setStorageBlocked]=useState(false);const [historical,setHistorical]=useState(false);
   const [selected,setSelected]=useState({scene:0,shot:0});const [proposal,setProposal]=useState(false);
   const [keyframeModalOpen,setKeyframeModalOpen]=useState(false);
+  const [videoModalOpen,setVideoModalOpen]=useState(false);
+  const [rateCards,setRateCards]=useState<{id:string;provider:string;model:string;operation:string;rateType:string;unitPriceUsdMicros:string}[]>([]);
+  const [generatingKind,setGeneratingKind]=useState<'IMAGE'|'VIDEO'|null>(null);
+  const [generatingProgress,setGeneratingProgress]=useState<string|null>(null);
+  const [generationError,setGenerationError]=useState<string|null>(null);
+  const [executionMode,setExecutionMode]=useState<'REPLAY'|'LIVE'>('REPLAY');
+  const [selectedVideoProvider,setSelectedVideoProvider]=useState<'RUNWAY'|'FAL_KLING'|'LOCAL_PAN_ZOOM'>('RUNWAY');
+  const [shotMediaMap,setShotMediaMap]=useState<Record<string,{keyframeApproved:boolean;keyframePending:boolean;videoApproved:boolean;videoPending:boolean;attemptsCount:number}>>({});
+
+  async function refreshShotMedia(shots: { id?: string }[]) {
+    const validShots = shots.filter(s => Boolean(s.id));
+    if (validShots.length === 0) return;
+    const map: Record<string, { keyframeApproved: boolean; keyframePending: boolean; videoApproved: boolean; videoPending: boolean; attemptsCount: number }> = {};
+
+    await Promise.all(
+      validShots.map(async s => {
+        try {
+          const [assetsRes, attemptsRes] = await Promise.all([
+            fetch(`${base}/shots/${s.id}/assets`, { cache: 'no-store' }),
+            fetch(`${base}/shots/${s.id}/attempts`, { cache: 'no-store' }),
+          ]);
+          let keyframeApproved = false;
+          let keyframePending = false;
+          let videoApproved = false;
+          let videoPending = false;
+          let attemptsCount = 0;
+
+          if (assetsRes.ok) {
+            const assets = (await assetsRes.json()) as { kind: string; latestReviewDecision: string | null; isSelected: boolean }[];
+            keyframeApproved = assets.some(a => a.kind === 'IMAGE' && a.latestReviewDecision === 'APPROVED' && a.isSelected);
+            keyframePending = !keyframeApproved && assets.some(a => a.kind === 'IMAGE' && (!a.latestReviewDecision || a.latestReviewDecision === 'PENDING_REVIEW'));
+            videoApproved = assets.some(a => a.kind === 'VIDEO' && a.latestReviewDecision === 'APPROVED' && a.isSelected);
+            videoPending = !videoApproved && assets.some(a => a.kind === 'VIDEO' && (!a.latestReviewDecision || a.latestReviewDecision === 'PENDING_REVIEW'));
+          }
+          if (attemptsRes.ok) {
+            const attempts = (await attemptsRes.json()) as unknown[];
+            attemptsCount = attempts.length;
+          }
+          map[s.id!] = { keyframeApproved, keyframePending, videoApproved, videoPending, attemptsCount };
+        } catch {
+          // Non-blocking for badge display
+        }
+      })
+    );
+    setShotMediaMap(prev => ({ ...prev, ...map }));
+  }
 
   /** Reload authoritative state; populate expected Shot tokens for subsequent full-snapshot save. */
   async function load(revisionId?:string,restore=false){
@@ -47,12 +94,18 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
     let expected={expectedStoryRevisionId:b.active?.id??null,expectedStateVersion:b.active?.stateVersion??0};let restored=false;
     if(restore){const raw=sessionStorage.getItem(`${slot}-draft`);if(raw){const parsed=saveStorySchema.parse(JSON.parse(raw) as unknown);next=parsed.content;expected=expectedSchema.parse({expectedStoryRevisionId:parsed.expectedStoryRevisionId,expectedStateVersion:parsed.expectedStateVersion});restored=true;}}
     setContent(next);setToken(expected);setDirty(restored);
+    if(next) {
+      const allShots = next.scenes.flatMap(s => s.shots);
+      void refreshShotMedia(allShots);
+    }
   }
   useEffect(()=>{void(async()=>{
     try{
       const raw=sessionStorage.getItem(`${slot}-pending`);if(raw)setPending(pendingFrom(raw));
       await load(undefined,true);
       const response=await fetch(base,{cache:'no-store'});if(response.ok)setBudget(filmDtoSchema.parse(await response.json()).budgetLimitUsdMicros);
+      const rcRes = await fetch('/api/rate-cards', { cache: 'no-store' });
+      if (rcRes.ok) setRateCards(await rcRes.json());
     }catch{setStorageBlocked(true);setError('Unable to restore the workspace. Reload or explicitly discard stored state.');}
   })();},[filmId]);
 
@@ -99,6 +152,84 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const shot=content?.scenes[selected.scene]?.shots[selected.shot];
   const updateShot=(f:(s:ShotSpec)=>void)=>edit(c=>f(c.scenes[selected.scene].shots[selected.shot].spec));
   const total=content?.scenes.flatMap(s=>s.shots).reduce((n,s)=>n+s.spec.durationSeconds,0)??0;
+
+  async function handleGenerate(kind: 'IMAGE' | 'VIDEO') {
+    if (!shot?.id || !board?.revision || !board.active) return;
+    const shotRev = board.revision.shotRevisions[shot.id];
+    if (!shotRev) return;
+
+    const currentMedia = shotMediaMap[shot.id] ?? { keyframeApproved: false, videoApproved: false, keyframePending: false, videoPending: false, attemptsCount: 0 };
+    if (kind === 'VIDEO' && shotRev.policy.effectiveRequirement === 'REQUIRED' && !currentMedia.keyframeApproved) {
+      setGenerationError('Keyframe approval is REQUIRED before generating video for this shot.');
+      return;
+    }
+
+    setGeneratingKind(kind);
+    setGeneratingProgress('QUEUED');
+    setGenerationError(null);
+
+    try {
+      let targetCard = rateCards.find(rc => rc.operation === kind && (kind === 'IMAGE' ? rc.provider === 'GEMINI' : rc.provider === selectedVideoProvider));
+      if (!targetCard) targetCard = rateCards.find(rc => rc.operation === kind);
+      if (!targetCard) throw new Error(`No active rate card found for ${kind}`);
+
+      const idempotencyKey = crypto.randomUUID();
+      const res = await fetch(`${base}/attempts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          storyRevisionId: board.active.id,
+          shotRevisionId: shotRev.id,
+          kind,
+          rateCardSnapshotId: targetCard.id,
+          pricingUnits: kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1,
+          executionMode,
+        }),
+      });
+
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const receipt = (await res.json()) as { attemptId: string };
+      const attemptId = receipt.attemptId;
+
+      // Short-poll status
+      let finalState = 'QUEUED';
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        const pollRes = await fetch(`/api/attempts/${attemptId}/financials`, { cache: 'no-store' });
+        if (pollRes.ok) {
+          const pollData = (await pollRes.json()) as { state: string };
+          finalState = pollData.state;
+          setGeneratingProgress(finalState);
+          if (finalState === 'SUCCEEDED' || finalState === 'FAILED' || finalState === 'CANCELED') break;
+        }
+      }
+
+      if (finalState === 'SUCCEEDED') {
+        if (content) void refreshShotMedia(content.scenes.flatMap(s => s.shots));
+        if (kind === 'IMAGE') setKeyframeModalOpen(true);
+        else setVideoModalOpen(true);
+      } else if (finalState === 'FAILED') {
+        throw new Error('Generation failed in background worker.');
+      } else {
+        throw new Error('Generation timed out. Check review modal later.');
+      }
+    } catch (err: unknown) {
+      setGenerationError(err instanceof Error ? err.message : 'Generation failed');
+    } finally {
+      setGeneratingKind(null);
+      setGeneratingProgress(null);
+    }
+  }
+
+  const currentMedia = shot?.id ? shotMediaMap[shot.id] ?? { keyframeApproved: false, videoApproved: false, keyframePending: false, videoPending: false, attemptsCount: 0 } : { keyframeApproved: false, videoApproved: false, keyframePending: false, videoPending: false, attemptsCount: 0 };
+  const shotRev = shot?.id && board?.revision ? board.revision.shotRevisions[shot.id] : null;
+  const isStoryApproved = board?.active?.state === 'APPROVED';
+  const isKeyframeRequired = shotRev?.policy.effectiveRequirement === 'REQUIRED';
+  const isVideoBlockedByKeyframe = isKeyframeRequired && !currentMedia.keyframeApproved;
+
   if(!board&&!error)return <div role="status" className="h-64 animate-pulse bg-zinc-900 rounded">Loading storyboard…</div>;
   return <div data-story-workspace>
     <header className="sticky top-0 z-10 bg-zinc-950 py-4 border-b border-zinc-800 space-y-3"><div className="flex justify-between gap-4 flex-wrap"><h1 className="text-2xl font-bold">Story Planning</h1><Navigation/></div>
@@ -121,7 +252,34 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
       <legend className="sr-only">Storyboard editor</legend>
       <aside className="space-y-4 border-r border-zinc-800 pr-4"><h2 className="font-semibold">Scenes and shots</h2>
         {content.scenes.map((scene,si)=><section key={scene.clientRef} className="space-y-2"><Field label={`Scene ${si+1} title`} value={scene.title} onChange={v=>edit(c=>{c.scenes[si].title=v;})}/>
-          {scene.shots.map((s,qi)=><button type="button" key={s.clientRef} aria-pressed={selected.scene===si&&selected.shot===qi} onClick={()=>setSelected({scene:si,shot:qi})} className={`block w-full text-left rounded px-2 py-2 text-sm ${selected.scene===si&&selected.shot===qi?'bg-zinc-800 text-amber-300':'text-zinc-400'}`}>Shot {qi+1} · {s.spec.durationSeconds}s</button>)}
+          {scene.shots.map((s,qi)=>{
+            const m = s.id ? shotMediaMap[s.id] : undefined;
+            return (
+              <button
+                type="button"
+                key={s.clientRef}
+                aria-pressed={selected.scene===si&&selected.shot===qi}
+                onClick={()=>setSelected({scene:si,shot:qi})}
+                className={`flex items-center justify-between w-full text-left rounded px-2 py-2 text-sm ${
+                  selected.scene===si&&selected.shot===qi?'bg-zinc-800 text-amber-300':'text-zinc-400'
+                }`}
+              >
+                <span>Shot {qi+1} · {s.spec.durationSeconds}s</span>
+                <span className="flex items-center gap-1 text-[10px] font-mono">
+                  {m?.keyframeApproved ? (
+                    <span className="bg-emerald-950/80 text-emerald-400 px-1 py-0.5 rounded border border-emerald-800/60" title="Keyframe approved">KF✓</span>
+                  ) : m?.keyframePending ? (
+                    <span className="bg-amber-950/80 text-amber-400 px-1 py-0.5 rounded border border-amber-800/60" title="Keyframe pending review">KF?</span>
+                  ) : null}
+                  {m?.videoApproved ? (
+                    <span className="bg-emerald-950/80 text-emerald-400 px-1 py-0.5 rounded border border-emerald-800/60" title="Video approved">VID✓</span>
+                  ) : m?.videoPending ? (
+                    <span className="bg-amber-950/80 text-amber-400 px-1 py-0.5 rounded border border-amber-800/60" title="Video pending review">VID?</span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
           <Button variant="outline" onClick={()=>edit(c=>{const spec=structuredClone(c.scenes[si].shots[0]?.spec??manualStory('New shot').scenes[0].shots[0].spec);c.scenes[si].shots.push({clientRef:`shot-${crypto.randomUUID()}`,spec});})}>Add shot</Button>
           <Button variant="outline" disabled={content.scenes.length<2} onClick={()=>{edit(c=>{c.scenes.splice(si,1);});setSelected({scene:0,shot:0});}}>Remove scene</Button>
           <Button variant="outline" disabled={si===0} onClick={()=>{edit(c=>{[c.scenes[si-1],c.scenes[si]]=[c.scenes[si],c.scenes[si-1]];});setSelected({scene:0,shot:0});}}>Move scene up</Button>
@@ -140,19 +298,173 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
         <label className="block text-sm">Shot type<select className={inputClass} value={shot.spec.shotType} onChange={e=>updateShot(s=>{s.shotType=e.target.value as ShotSpec['shotType'];})}>{['CHARACTER','ACTION','DIALOGUE','ESTABLISHING','BROLL','INSERT','PRODUCT','OTHER'].map(t=><option key={t}>{t}</option>)}</select></label>
         <Field label="Camera framing" value={shot.spec.camera.framing} onChange={v=>updateShot(s=>{s.camera.framing=v;})}/><Field label="Camera movement" value={shot.spec.camera.movement} onChange={v=>updateShot(s=>{s.camera.movement=v;})}/>
         {(['locationId','styleRefId'] as const).map(field=><label key={field} className="block text-sm">{field==='locationId'?'Shot location':'Visual style'}<select className={inputClass} value={shot.spec[field]} onChange={e=>updateShot(s=>{s[field]=e.target.value;if(field==='locationId'){s.continuity.start.locationId=e.target.value;s.continuity.end.locationId=e.target.value;}})}>{content.storyBible[field==='locationId'?'locations':'styleRefs'].map(d=><option value={d.id} key={d.id}>{d.name}</option>)}</select></label>)}
-        <div className="space-y-1">
-          <p className="text-sm text-zinc-400">Keyframe: {board?.revision?.shotRevisions[shot.id??'']?.policy.effectiveRequirement??'Classified on save'}</p>
-          {shot.id && board?.revision && (
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => setKeyframeModalOpen(true)}
-              className="w-full text-xs h-8 border-amber-600/50 text-amber-300 hover:bg-amber-950/40"
-            >
-              Review Keyframes & Assets
-            </Button>
+        <section aria-label="Media Generation & Review" className="space-y-3 rounded border border-zinc-800 bg-zinc-900/50 p-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Media Generation & Review</h3>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500 font-mono">MODE:</span>
+              <button
+                type="button"
+                onClick={() => setExecutionMode(m => m === 'REPLAY' ? 'LIVE' : 'REPLAY')}
+                className={`px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded border transition-colors ${
+                  executionMode === 'REPLAY'
+                    ? 'bg-amber-950/60 text-amber-400 border-amber-800/60 hover:bg-amber-900/40'
+                    : 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60 hover:bg-emerald-900/40'
+                }`}
+                title="Toggle between REPLAY (safe test fixtures) and LIVE (real provider API charges)"
+              >
+                {executionMode}
+              </button>
+            </div>
+          </div>
+
+          {/* Keyframe Section */}
+          <div className="space-y-2 rounded border border-zinc-800/80 bg-zinc-950/60 p-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-zinc-300">1. Reference Keyframe</span>
+              <div className="flex items-center gap-1">
+                <span className={`px-1.5 py-0.5 text-[10px] font-mono rounded ${
+                  isKeyframeRequired ? 'bg-amber-950 text-amber-300 border border-amber-800/50' : 'bg-zinc-800 text-zinc-400'
+                }`}>
+                  {shotRev?.policy.effectiveRequirement ?? 'REQUIRED'}
+                </span>
+                {currentMedia.keyframeApproved ? (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-emerald-950 text-emerald-300 rounded border border-emerald-800/60">
+                    APPROVED
+                  </span>
+                ) : currentMedia.keyframePending ? (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-950 text-amber-300 rounded border border-amber-800/60">
+                    PENDING REVIEW
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 text-zinc-400 rounded">
+                    NONE
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                type="button"
+                disabled={disabled || !shot.id || !shotRev || Boolean(generatingKind)}
+                onClick={() => void handleGenerate('IMAGE')}
+                className="flex-1 text-xs h-8 border-zinc-700 hover:border-zinc-500"
+              >
+                {generatingKind === 'IMAGE' ? `Generating (${generatingProgress})…` : 'Generate Keyframe'}
+              </Button>
+              {shot.id && shotRev && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => setKeyframeModalOpen(true)}
+                  className="text-xs h-8 border-amber-600/50 text-amber-300 hover:bg-amber-950/40"
+                >
+                  Review KF
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Video Section */}
+          <div className="space-y-2 rounded border border-zinc-800/80 bg-zinc-950/60 p-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-zinc-300">2. Video Clip</span>
+              <div className="flex items-center gap-1">
+                {currentMedia.videoApproved ? (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-emerald-950 text-emerald-300 rounded border border-emerald-800/60">
+                    APPROVED
+                  </span>
+                ) : currentMedia.videoPending ? (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-amber-950 text-amber-300 rounded border border-amber-800/60">
+                    PENDING REVIEW
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 text-zinc-400 rounded">
+                    NONE
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <label className="block text-xs text-zinc-400">
+              Provider / Model
+              <select
+                className={`${inputClass} mt-1 h-8 text-xs`}
+                value={selectedVideoProvider}
+                onChange={e => setSelectedVideoProvider(e.target.value as 'RUNWAY' | 'FAL_KLING' | 'LOCAL_PAN_ZOOM')}
+              >
+                <option value="RUNWAY">Runway Gen-4 Turbo (I2V)</option>
+                <option value="FAL_KLING">fal.ai Kling v3 Pro (I2V)</option>
+                <option value="LOCAL_PAN_ZOOM">Local Pan/Zoom (Cost-saving static)</option>
+              </select>
+            </label>
+
+            {/* Gating Notices */}
+            {!isStoryApproved ? (
+              <p className="text-[11px] text-amber-400/90 bg-amber-950/30 border border-amber-900/50 rounded p-1.5">
+                Story revision must be APPROVED before video dispatch.
+              </p>
+            ) : isVideoBlockedByKeyframe ? (
+              <p className="text-[11px] text-amber-400/90 bg-amber-950/30 border border-amber-900/50 rounded p-1.5">
+                Keyframe approval is REQUIRED before video generation.
+              </p>
+            ) : null}
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                type="button"
+                disabled={
+                  disabled ||
+                  !shot.id ||
+                  !shotRev ||
+                  !isStoryApproved ||
+                  isVideoBlockedByKeyframe ||
+                  Boolean(generatingKind)
+                }
+                onClick={() => void handleGenerate('VIDEO')}
+                className="flex-1 text-xs h-8 border-zinc-700 hover:border-zinc-500 disabled:opacity-50"
+              >
+                {generatingKind === 'VIDEO' ? `Generating (${generatingProgress})…` : 'Generate Video'}
+              </Button>
+              {shot.id && shotRev && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => setVideoModalOpen(true)}
+                  className="text-xs h-8 border-amber-600/50 text-amber-300 hover:bg-amber-950/40"
+                >
+                  Review Video
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Active Generation Status / Error */}
+          {generatingKind && (
+            <div className="flex items-center gap-2 p-2 bg-amber-950/20 border border-amber-800/40 rounded text-xs text-amber-300">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+              <span>Generating {generatingKind} via {executionMode} mode: {generatingProgress}…</span>
+            </div>
           )}
-        </div>
+
+          {generationError && (
+            <div className="p-2 bg-rose-950/30 border border-rose-800/50 rounded text-xs text-rose-300">
+              <div className="flex justify-between items-start">
+                <span>{generationError}</span>
+                <button
+                  type="button"
+                  onClick={() => setGenerationError(null)}
+                  className="text-zinc-500 hover:text-zinc-300 ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
         <label className="block text-sm"><input type="checkbox" checked={Boolean(shot.spec.keyframeOverride)} onChange={e=>updateShot(s=>{s.keyframeOverride=e.target.checked?{requirement:'REQUIRED',reason:'',riskAcknowledged:true}:null;})}/> Explicit keyframe policy override (acknowledge risk)</label>
         {shot.spec.keyframeOverride&&<><label className="block text-sm">Override requirement<select className={inputClass} value={shot.spec.keyframeOverride.requirement} onChange={e=>updateShot(s=>{if(s.keyframeOverride)s.keyframeOverride.requirement=e.target.value as 'REQUIRED'|'OPTIONAL';})}><option>REQUIRED</option><option>OPTIONAL</option></select></label><Field label="Override reason" value={shot.spec.keyframeOverride.reason} onChange={v=>updateShot(s=>{if(s.keyframeOverride)s.keyframeOverride.reason=v;})}/></>}
         <h3 className="font-semibold">Intentional transition from preceding shot</h3>
@@ -177,15 +489,32 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
     <section className="mt-8 border-t border-zinc-800 py-5"><h2 className="font-semibold mb-3">Validation and approval evidence</h2>{historicalValidation&&<p role="status" className="text-amber-300">Historical evidence uses {board?.validation?.ruleSetVersion}; current G1 requires {board?.currentRuleSetVersion}. Create and approve a successor revision for current acceptance.</p>}{board?.validation?.findings.length===0&&!historicalValidation&&<p>No blocking findings under {board.currentRuleSetVersion}.</p>}{board?.validation?.findings.map(f=><div key={f.fingerprint} className="my-3 text-sm"><p className={f.severity==='ERROR'?'text-rose-300':'text-amber-300'}>{f.severity}: {f.message}</p><p className="text-zinc-500">{f.path}</p>{board.waivers.some(w=>w.findingFingerprint===f.fingerprint)?<p>Waived with producer reason.</p>:f.waivable&&<Button variant="outline" disabled={disabled||dirty||!['PLANNED','IN_REVIEW'].includes(board.active?.state??'')} onClick={()=>{const reason=window.prompt('Reason for accepting this wardrobe/held-prop mismatch');if(reason?.trim())mutate('waivers',{...token,findingFingerprint:f.fingerprint,reason});}}>Waive finding</Button>}</div>)}{board?.approval&&<p className={historicalValidation?'text-amber-300':'text-emerald-300'}>Approval recorded for revision {board.revision?.revisionNo}. {historicalValidation?'This remains historical audit evidence only.':'Evidence is bound to this content, waiver set, and current ruleset.'}</p>}</section>
     <section className="border-t border-zinc-800 py-5"><h2 className="font-semibold mb-3">Revision history</h2><div className="flex gap-2 flex-wrap">{board?.history.map(r=><Button key={r.id} variant="outline" disabled={busy||dirty||Boolean(pending)} onClick={()=>void load(r.id).catch(()=>setError('Unable to read history.'))}>Revision {r.revisionNo} · {r.state}</Button>)}</div></section>
     {shot?.id && board?.revision?.shotRevisions[shot.id] && (
-      <KeyframeReviewModal
-        filmId={filmId}
-        shotId={shot.id}
-        shotRevisionId={board.revision.shotRevisions[shot.id].id}
-        keyframeRequirement={board.revision.shotRevisions[shot.id].policy.effectiveRequirement}
-        isOpen={keyframeModalOpen}
-        onClose={() => setKeyframeModalOpen(false)}
-        onReviewSubmitted={() => void load()}
-      />
+      <>
+        <KeyframeReviewModal
+          filmId={filmId}
+          shotId={shot.id}
+          shotRevisionId={board.revision.shotRevisions[shot.id].id}
+          keyframeRequirement={board.revision.shotRevisions[shot.id].policy.effectiveRequirement}
+          isOpen={keyframeModalOpen}
+          onClose={() => setKeyframeModalOpen(false)}
+          onReviewSubmitted={() => {
+            void load();
+            if (content) void refreshShotMedia(content.scenes.flatMap(s => s.shots));
+          }}
+        />
+        <VideoReviewModal
+          filmId={filmId}
+          shotId={shot.id}
+          shotRevisionId={board.revision.shotRevisions[shot.id].id}
+          shotPrompt={shot.spec.prompt}
+          isOpen={videoModalOpen}
+          onClose={() => setVideoModalOpen(false)}
+          onReviewSubmitted={() => {
+            void load();
+            if (content) void refreshShotMedia(content.scenes.flatMap(s => s.shots));
+          }}
+        />
+      </>
     )}
   </div>;
 }

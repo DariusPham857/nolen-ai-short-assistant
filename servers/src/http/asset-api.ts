@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { reviewAssetSchema } from '@nolen/contracts';
-import { getAssetMedia, getShotAssets, reviewAsset } from '../assets/repository.js';
+import { reviewAssetSchema, selectShotAssetSchema } from '@nolen/contracts';
+import { getAssetMedia, getShotAssets, getShotAttempts, reviewAsset, selectShotAsset } from '../assets/repository.js';
 import { ApiFailure } from './errors.js';
 import { boundedJson, installBoundary, requireOperator, resourceId } from './boundary.js';
 
@@ -13,6 +13,23 @@ export function createAssetApi() {
     const shotId = resourceId(c.req.param('shotId'));
     const operatorId = await requireOperator(c);
     const result = await getShotAssets(filmId, shotId, operatorId);
+    return c.json(result);
+  });
+
+  api.get('/api/films/:filmId/shots/:shotId/attempts', async c => {
+    const filmId = resourceId(c.req.param('filmId'));
+    const shotId = resourceId(c.req.param('shotId'));
+    const operatorId = await requireOperator(c);
+    const result = await getShotAttempts(filmId, shotId, operatorId);
+    return c.json(result);
+  });
+
+  api.post('/api/films/:filmId/shots/:shotId/selections', async c => {
+    const filmId = resourceId(c.req.param('filmId'));
+    const shotId = resourceId(c.req.param('shotId'));
+    const operatorId = await requireOperator(c);
+    const body = selectShotAssetSchema.parse(await boundedJson(c.req.raw, 16384));
+    const result = await selectShotAsset(filmId, shotId, operatorId, body);
     return c.json(result);
   });
 
@@ -41,6 +58,8 @@ export function createAssetApi() {
 
   for (const [route, allow] of [
     ['/api/films/:filmId/shots/:shotId/assets', 'GET'],
+    ['/api/films/:filmId/shots/:shotId/attempts', 'GET'],
+    ['/api/films/:filmId/shots/:shotId/selections', 'POST'],
     ['/api/assets/:assetId/review', 'POST'],
     ['/api/assets/:assetId/media', 'GET'],
   ] as const) {

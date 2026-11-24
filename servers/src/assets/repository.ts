@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { AssetDto, ReviewAsset, ShotAssetSelectionDto } from '@nolen/contracts';
+import type { AssetDto, ReviewAsset, ShotAssetSelectionDto, SelectShotAsset, ShotAttemptDto } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { ApiFailure } from '../http/errors.js';
 import { storage, type AssetCategory } from '../lib/storage.js';
@@ -406,3 +406,171 @@ export async function fakeAssetProducer(input: {
     metadata: { fixture: true, timestamp: Date.now() },
   });
 }
+
+/**
+ * Select an approved asset as the authoritative selection for a shot.
+ * Enforces:
+ * - Film ownership & active story revision
+ * - Asset belongs to film and matches requested kind
+ * - Asset belongs to shot in active story revision
+ * - Asset has latest review decision APPROVED
+ * - Atomically upserts into shot_asset_selections
+ */
+export async function selectShotAsset(
+  filmId: string,
+  shotId: string,
+  operatorId: string,
+  input: SelectShotAsset,
+): Promise<ShotAssetSelectionDto> {
+  return pgClient.begin(async tx => {
+    const [film] = await tx<{ id: string; active_story_revision_id: string | null }[]>`
+      SELECT id, active_story_revision_id FROM films WHERE id = ${filmId} AND operator_id = ${operatorId} FOR UPDATE
+    `;
+    if (!film) {
+      throw new ApiFailure(404, 'FILM_NOT_FOUND', 'Film not found');
+    }
+    if (!film.active_story_revision_id) {
+      throw new ApiFailure(409, 'NO_ACTIVE_STORY_REVISION', 'Film has no active story revision');
+    }
+
+    const [asset] = await tx<AssetRow[]>`
+      SELECT * FROM assets WHERE id = ${input.assetId} AND film_id = ${filmId}
+    `;
+    if (!asset) {
+      throw new ApiFailure(404, 'ASSET_NOT_FOUND', 'Asset not found');
+    }
+    if (asset.kind !== input.kind) {
+      throw new ApiFailure(422, 'ASSET_KIND_MISMATCH', `Asset kind ${asset.kind} does not match requested kind ${input.kind}`);
+    }
+
+    const [shotLink] = await tx<{ story_revision_id: string; shot_id: string }[]>`
+      SELECT story_revision_id, shot_id
+      FROM story_revision_shots
+      WHERE film_id = ${filmId}
+        AND shot_id = ${shotId}
+        AND shot_revision_id = ${asset.shot_revision_id}
+        AND story_revision_id = ${film.active_story_revision_id}
+    `;
+    if (!shotLink) {
+      throw new ApiFailure(422, 'SHOT_REVISION_MISMATCH', 'Asset does not belong to the active revision of this shot');
+    }
+
+    const [latestReview] = await tx<{ decision: 'APPROVED' | 'REJECTED' }[]>`
+      SELECT decision FROM asset_reviews
+      WHERE asset_id = ${input.assetId}
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `;
+    if (!latestReview || latestReview.decision !== 'APPROVED') {
+      throw new ApiFailure(422, 'ASSET_NOT_APPROVED', 'Only approved assets can be selected');
+    }
+
+    const [selRow] = await tx<{
+      story_revision_id: string;
+      shot_id: string;
+      shot_revision_id: string;
+      asset_id: string;
+      kind: 'IMAGE' | 'VIDEO';
+      selected_at: Date | string;
+    }[]>`
+      INSERT INTO shot_asset_selections (
+        story_revision_id, shot_id, kind, shot_revision_id,
+        asset_id, film_id, selected_by, selected_at
+      ) VALUES (
+        ${shotLink.story_revision_id}, ${shotId}, ${input.kind}, ${asset.shot_revision_id},
+        ${input.assetId}, ${filmId}, ${operatorId}, clock_timestamp()
+      )
+      ON CONFLICT (story_revision_id, shot_id, kind)
+      DO UPDATE SET
+        shot_revision_id = EXCLUDED.shot_revision_id,
+        asset_id = EXCLUDED.asset_id,
+        selected_by = EXCLUDED.selected_by,
+        selected_at = EXCLUDED.selected_at
+      RETURNING story_revision_id, shot_id, shot_revision_id, asset_id, kind, selected_at
+    `;
+
+    return {
+      storyRevisionId: selRow.story_revision_id,
+      shotId: selRow.shot_id,
+      shotRevisionId: selRow.shot_revision_id,
+      assetId: selRow.asset_id,
+      kind: selRow.kind,
+      reviewDecision: 'APPROVED',
+      selectedAt: new Date(selRow.selected_at).toISOString(),
+      asset: toAssetDto(asset),
+    };
+  });
+}
+
+/**
+ * Get all attempts generated for a specific shot in the film's active story revision.
+ */
+export async function getShotAttempts(
+  filmId: string,
+  shotId: string,
+  operatorId: string,
+): Promise<ShotAttemptDto[]> {
+  const [film] = await pgClient<{ id: string; active_story_revision_id: string | null }[]>`
+    SELECT id, active_story_revision_id FROM films WHERE id = ${filmId} AND operator_id = ${operatorId}
+  `;
+  if (!film) {
+    throw new ApiFailure(404, 'FILM_NOT_FOUND', 'Film not found');
+  }
+
+  type AttemptJoinedRow = {
+    id: string;
+    film_id: string;
+    story_revision_id: string | null;
+    shot_revision_id: string | null;
+    kind: 'IMAGE' | 'VIDEO' | 'TTS' | 'ASSEMBLY';
+    state: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED';
+    execution_mode: 'LIVE' | 'REPLAY';
+    provider: string | null;
+    asset_id: string | null;
+    latest_review_decision: 'APPROVED' | 'REJECTED' | null;
+    is_selected: boolean;
+    created_at: Date | string;
+  };
+
+  const rows = await pgClient<AttemptJoinedRow[]>`
+    SELECT a.id, a.film_id, a.story_revision_id, a.shot_revision_id,
+           a.kind, a.state, a.execution_mode, a.created_at,
+           rcs.provider,
+           ast.id AS asset_id,
+           lr.decision AS latest_review_decision,
+           (s.asset_id IS NOT NULL) AS is_selected
+    FROM attempts a
+    JOIN story_revision_shots srs ON srs.film_id = a.film_id AND srs.shot_revision_id = a.shot_revision_id
+    LEFT JOIN rate_card_snapshots rcs ON rcs.id = a.rate_card_snapshot_id
+    LEFT JOIN assets ast ON ast.attempt_id = a.id
+    LEFT JOIN (
+      SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision, r.created_at, r.id
+      FROM asset_reviews r
+      ORDER BY r.asset_id, r.created_at DESC, r.id DESC
+    ) lr ON lr.asset_id = ast.id
+    LEFT JOIN shot_asset_selections s ON s.asset_id = ast.id
+      AND s.story_revision_id = srs.story_revision_id
+      AND s.shot_id = srs.shot_id
+      AND s.kind = a.kind
+    WHERE a.film_id = ${filmId}
+      AND srs.shot_id = ${shotId}
+      AND srs.story_revision_id = ${film.active_story_revision_id}
+    ORDER BY a.created_at DESC
+  `;
+
+  return rows.map(r => ({
+    id: r.id,
+    filmId: r.film_id,
+    storyRevisionId: r.story_revision_id,
+    shotRevisionId: r.shot_revision_id,
+    kind: r.kind,
+    state: r.state,
+    executionMode: r.execution_mode,
+    provider: r.provider ?? undefined,
+    assetId: r.asset_id ?? null,
+    latestReviewDecision: r.latest_review_decision ?? null,
+    isSelected: r.is_selected,
+    createdAt: new Date(r.created_at).toISOString(),
+  }));
+}
+
