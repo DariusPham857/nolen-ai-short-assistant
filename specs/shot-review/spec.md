@@ -1,6 +1,6 @@
 # EP-05 — Shot Video Generation, Attempt History & Review Workstation (T-026, T-027)
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: IN_PROGRESS
 Source: [PRD v1.0 §19, §25, §29, §30.3](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
 ## Goal

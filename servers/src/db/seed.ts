@@ -34,7 +34,8 @@ async function seed() {
     console.log("[seed] Films already exist, skipping.");
   }
 
-  // Provision verified baseline rate card snapshots (PRD v1.0 §1265-1267, DEC-P03)
+  // Provision illustrative baseline rate card snapshots (PRD v1.0 §1265-1267, DEC-P03)
+  // Labeled MODELED_ONLY so they are valid for REPLAY/DEV and rejected for unverified LIVE dispatch
   const baselineRateCards = [
     {
       id: '00000000-0000-4000-a000-000000000001',
@@ -43,7 +44,7 @@ async function seed() {
       operation: 'IMAGE',
       rateType: 'FIXED_PER_REQUEST',
       unitPriceUsdMicros: '67000', // $0.067/image (PRD v1.0 §1265)
-      sourceRef: 'PRD v1.0 §1265 (listed Gemini 3.1 Flash Image standard rate)',
+      sourceRef: 'MODELED_ONLY (PRD v1.0 §1265 listed Gemini 3.1 Flash Image rate for REPLAY/DEV)',
     },
     {
       id: '00000000-0000-4000-a000-000000000002',
@@ -52,7 +53,7 @@ async function seed() {
       operation: 'VIDEO',
       rateType: 'PER_SECOND',
       unitPriceUsdMicros: '50000', // $0.05/output second (PRD v1.0 §1266)
-      sourceRef: 'PRD v1.0 §1266 (Runway Dev API Gen-4 Turbo credit conversion)',
+      sourceRef: 'MODELED_ONLY (PRD v1.0 §1266 Runway Gen-4 Turbo illustrative rate for REPLAY/DEV)',
     },
     {
       id: '00000000-0000-4000-a000-000000000003',
@@ -61,7 +62,7 @@ async function seed() {
       operation: 'VIDEO',
       rateType: 'PER_SECOND',
       unitPriceUsdMicros: '140000', // $0.14/output second (PRD v1.0 §1267)
-      sourceRef: 'PRD v1.0 §1267 (fal.ai Kling v3 Pro queue rate card)',
+      sourceRef: 'MODELED_ONLY (PRD v1.0 §1267 fal.ai Kling v3 Pro queue rate for REPLAY/DEV)',
     },
     {
       id: '00000000-0000-4000-a000-000000000004',
@@ -70,7 +71,7 @@ async function seed() {
       operation: 'VIDEO',
       rateType: 'FIXED_PER_REQUEST',
       unitPriceUsdMicros: '0', // $0.00 static shot bypass route (DEC-P03)
-      sourceRef: 'DEC-P03 (local FFmpeg pan/zoom static shot cost lever)',
+      sourceRef: 'MODELED_ONLY (DEC-P03 local FFmpeg pan/zoom static shot cost lever for REPLAY/DEV)',
     },
   ];
 

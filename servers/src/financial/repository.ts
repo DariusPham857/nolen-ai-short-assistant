@@ -19,6 +19,7 @@ type RateRow = {
   id: string; provider: string; model: string; operation: string;
   rate_type: Rate['rateType']; unit_price_usd_micros: string;
   provider_maximum_usd_micros: string | null; effective_at: Date|string; expires_at: Date|string;
+  source_ref: string;
 };
 type FinancialRow = {
   attempt_id: string; film_id: string; state: string; rate_card_snapshot_id: string;
@@ -146,60 +147,68 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       if(!shot)throw new ApiFailure(422,'SHOT_REVISION_MISMATCH','ShotRevision is not part of the approved StoryRevision');
       shotId = shot.shot_id;
     }
-    if (input.kind === 'VIDEO') {
-      const [sr] = await tx<{ policy: { effectiveRequirement?: string; ruleTier?: string } | null }[]>`SELECT policy FROM shot_revisions WHERE id=${input.shotRevisionId} AND film_id=${filmId}`;
-      const policyReq = (sr?.policy as { effectiveRequirement?: string } | null)?.effectiveRequirement;
-      const isRequired = policyReq ? policyReq === 'REQUIRED' : true;
-      if (isRequired) {
-        const [approvedKeyframe] = await tx<{ asset_id: string; storage_path: string; sha256_hash: string }[]>`
-          SELECT s.asset_id, a.storage_path, a.sha256_hash
-          FROM shot_asset_selections s
-          JOIN assets a ON a.id = s.asset_id
-            AND a.film_id = s.film_id
-            AND a.shot_revision_id = s.shot_revision_id
-            AND a.kind = s.kind
-          JOIN (
-            SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision
-            FROM asset_reviews r
-            WHERE r.film_id = ${filmId}
-            ORDER BY r.asset_id, r.created_at DESC, r.id DESC
-          ) lr ON lr.asset_id = s.asset_id
-          WHERE s.story_revision_id = ${input.storyRevisionId}
-            AND s.shot_id = ${shotId}
-            AND s.kind = 'IMAGE'
-            AND s.shot_revision_id = ${input.shotRevisionId}
-            AND a.film_id = ${filmId}
-            AND a.shot_revision_id = ${input.shotRevisionId}
-            AND a.kind = 'IMAGE'
-            AND a.verified = true
-            AND lr.decision = 'APPROVED'
-          LIMIT 1
-        `;
-        if (!approvedKeyframe) {
-          throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
-        }
-
-        const category: AssetCategory = approvedKeyframe.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
-        const filename = path.basename(approvedKeyframe.storage_path);
-        if (!storage.exists(category, filename)) {
-          throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset missing from storage');
-        }
-        let verifiedOnDisk = false;
-        try {
-          verifiedOnDisk = await storage.verify(category, filename, approvedKeyframe.sha256_hash);
-        } catch {
-          verifiedOnDisk = false;
-        }
-        if (!verifiedOnDisk) {
-          throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset failed disk integrity check');
-        }
-      }
-    }
     const rate=await loadRate(tx,input.rateCardSnapshotId);
     if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');
-    const calculated=estimate(rateValue(rate),input.pricingUnits);
+
     const executionMode = input.executionMode ?? 'REPLAY';
     const isReplay = executionMode === 'REPLAY';
+
+    // Disallow unverified/modeled rate cards for billable LIVE admission (PRD v1.0 §1259, §1711)
+    if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
+      throw new ApiFailure(
+        422,
+        'UNVERIFIED_LIVE_RATE_CARD',
+        'Modeled rate cards are for REPLAY/development only and cannot be admitted for LIVE execution'
+      );
+    }
+
+    if (input.kind === 'VIDEO') {
+      // In P0 / DEC-P03 / PRD v1.0 §1290, all offered video paths (Runway I2V, fal Kling I2V, Local Pan/Zoom)
+      // are image-driven and require an approved keyframe, regardless of shot classification.
+      const [approvedKeyframe] = await tx<{ asset_id: string; storage_path: string; sha256_hash: string }[]>`
+        SELECT s.asset_id, a.storage_path, a.sha256_hash
+        FROM shot_asset_selections s
+        JOIN assets a ON a.id = s.asset_id
+          AND a.film_id = s.film_id
+          AND a.shot_revision_id = s.shot_revision_id
+          AND a.kind = s.kind
+        JOIN (
+          SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision
+          FROM asset_reviews r
+          WHERE r.film_id = ${filmId}
+          ORDER BY r.asset_id, r.created_at DESC, r.id DESC
+        ) lr ON lr.asset_id = s.asset_id
+        WHERE s.story_revision_id = ${input.storyRevisionId}
+          AND s.shot_id = ${shotId}
+          AND s.kind = 'IMAGE'
+          AND s.shot_revision_id = ${input.shotRevisionId}
+          AND a.film_id = ${filmId}
+          AND a.shot_revision_id = ${input.shotRevisionId}
+          AND a.kind = 'IMAGE'
+          AND a.verified = true
+          AND lr.decision = 'APPROVED'
+        LIMIT 1
+      `;
+      if (!approvedKeyframe) {
+        throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
+      }
+
+      const category: AssetCategory = approvedKeyframe.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
+      const filename = path.basename(approvedKeyframe.storage_path);
+      if (!storage.exists(category, filename)) {
+        throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset missing from storage');
+      }
+      let verifiedOnDisk = false;
+      try {
+        verifiedOnDisk = await storage.verify(category, filename, approvedKeyframe.sha256_hash);
+      } catch {
+        verifiedOnDisk = false;
+      }
+      if (!verifiedOnDisk) {
+        throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset failed disk integrity check');
+      }
+    }
+    const calculated=estimate(rateValue(rate),input.pricingUnits);
 
     let reservationValue: string;
     if (isReplay) {
@@ -365,7 +374,7 @@ export async function listRateCards(): Promise<{
   }[]>`
     SELECT id, provider, model, operation, rate_type, unit_price_usd_micros
     FROM rate_card_snapshots
-    WHERE expires_at > now()
+    WHERE effective_at <= now() AND expires_at > now()
     ORDER BY operation, provider
   `;
   return rows.map(r => ({

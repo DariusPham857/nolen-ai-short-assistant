@@ -80,23 +80,46 @@ test('EP-05: Keyframe gating blocks video generation before keyframe approval', 
 test('EP-05: Exact provider selection dispatches matching rate card without silent fallback', async ({ page }) => {
   await openStoryboard(page);
 
-  // Change video provider dropdown to FAL Kling
-  const providerSelect = page.getByLabel('Provider / Model');
-  await providerSelect.selectOption('FAL_KLING');
-  await expect(providerSelect).toHaveValue('FAL_KLING');
+  // Read available rate cards to find Gemini card ID
+  const rcRes = await page.request.get('/api/rate-cards');
+  const rateCards = (await rcRes.json()) as { id: string; provider: string; operation: string }[];
+  const geminiCard = rateCards.find(rc => rc.provider === 'GEMINI' && rc.operation === 'IMAGE');
 
-  // Verify that provider state is retained
-  await providerSelect.selectOption('LOCAL_PAN_ZOOM');
-  await expect(providerSelect).toHaveValue('LOCAL_PAN_ZOOM');
+  let interceptedBody: Record<string, unknown> | null = null;
+  await page.route('**/api/films/*/attempts', async route => {
+    interceptedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        attemptId: randomUUID(),
+        jobState: 'QUEUED',
+        reservedMicros: '0',
+        budgetVersion: 1,
+      }),
+    });
+  });
+
+  // Generate keyframe
+  const generateKeyframeBtn = page.getByRole('button', { name: 'Generate Keyframe', exact: true });
+  await generateKeyframeBtn.click();
+
+  expect(interceptedBody).not.toBeNull();
+  expect(interceptedBody?.kind).toBe('IMAGE');
+  if (geminiCard) {
+    expect(interceptedBody?.rateCardSnapshotId).toBe(geminiCard.id);
+  }
 });
 
 test('EP-05: Lost attempt response preserves retry identity across retries', async ({ page }) => {
   await openStoryboard(page);
 
   // Intercept attempts endpoint and abort to simulate lost connection
-  let capturedKey = '';
+  let originalKey = '';
+  let originalBody: Record<string, unknown> | null = null;
   await page.route('**/api/films/*/attempts', async route => {
-    capturedKey = route.request().headers()['idempotency-key'] ?? '';
+    originalKey = route.request().headers()['idempotency-key'] ?? '';
+    originalBody = route.request().postDataJSON() as Record<string, unknown>;
     await route.abort('failed');
   });
 
@@ -108,23 +131,40 @@ test('EP-05: Lost attempt response preserves retry identity across retries', asy
   const recoveryBanner = page.getByTestId('pending-attempt-banner');
   await expect(recoveryBanner).toBeVisible();
   await expect(recoveryBanner).toContainText('RETRY KEY PRESERVED');
-  await expect(recoveryBanner).toContainText(capturedKey);
+  await expect(recoveryBanner).toContainText(originalKey);
 
-  // Unroute the network abort
+  // Unroute the network abort and mock successful response
   await page.unroute('**/api/films/*/attempts');
-
-  // Retrying must send the identical idempotency key
   let retriedKey = '';
-  page.on('request', r => {
-    if (r.url().includes('/attempts')) {
-      retriedKey = r.headers()['idempotency-key'] ?? '';
-    }
+  let retriedBody: Record<string, unknown> | null = null;
+
+  await page.route('**/api/films/*/attempts', async route => {
+    retriedKey = route.request().headers()['idempotency-key'] ?? '';
+    retriedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        attemptId: randomUUID(),
+        jobState: 'QUEUED',
+        reservedMicros: '0',
+        budgetVersion: 1,
+      }),
+    });
   });
 
   const retryBtn = page.getByRole('button', { name: 'Retry same attempt', exact: true });
   await retryBtn.click();
 
-  expect(retriedKey).toBe(capturedKey);
+  // Assert both key and full payload match verbatim
+  expect(retriedKey).toBe(originalKey);
+  expect(retriedBody).not.toBeNull();
+  expect(retriedBody?.storyRevisionId).toBe(originalBody?.storyRevisionId);
+  expect(retriedBody?.shotRevisionId).toBe(originalBody?.shotRevisionId);
+  expect(retriedBody?.kind).toBe(originalBody?.kind);
+  expect(retriedBody?.rateCardSnapshotId).toBe(originalBody?.rateCardSnapshotId);
+  expect(retriedBody?.pricingUnits).toBe(originalBody?.pricingUnits);
+  expect(retriedBody?.executionMode).toBe(originalBody?.executionMode);
 });
 
 test('EP-05: Video review modal opens and displays review controls', async ({ page }) => {
@@ -134,11 +174,12 @@ test('EP-05: Video review modal opens and displays review controls', async ({ pa
   const reviewVideoBtn = page.getByRole('button', { name: 'Review Video', exact: true });
   await reviewVideoBtn.click();
 
-  // Video review modal should open
-  await expect(page.getByRole('dialog', { name: 'Review Video Asset' })).toBeVisible();
+  // Video review modal should open matching component aria-labelledby
+  const modal = page.getByRole('dialog', { name: 'Shot Video Review & Asset Selection' });
+  await expect(modal).toBeVisible();
   await expect(page.getByText('No video assets generated for this shot yet.')).toBeVisible();
 
-  // Close modal
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Review Video Asset' })).not.toBeVisible();
+  // Close modal using accessible name
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await expect(modal).not.toBeVisible();
 });

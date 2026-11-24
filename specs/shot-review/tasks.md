@@ -1,6 +1,6 @@
 # EP-05 Tasks: Shot Video Generation, Attempt History & Review Workstation (T-026, T-027)
 
-Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
+Status: IN_PROGRESS
 Source: [approved specification](spec.md)
 
 ## Tasks

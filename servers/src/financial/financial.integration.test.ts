@@ -546,5 +546,56 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     const [countAfter] = await pgClient<{ count: string }[]>`SELECT count(*)::text FROM rate_card_snapshots`;
     expect(countAfter.count).toBe(countBefore.count);
   });
+
+  it('EP-05: server-side keyframe gating blocks OPTIONAL shot video attempt when no keyframe approved', async () => {
+    const f = await fixture('100', '25');
+    const shotId = randomUUID();
+    const shotRevisionId = randomUUID();
+    const sceneId = randomUUID();
+    const videoRateCardId = randomUUID();
+
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${videoRateCardId}, 'RUNWAY', 'gen4_turbo', 'VIDEO', 'PER_SECOND', 50000, '2026-01-01', '2027-01-01', 'test runway rate')`;
+      await tx`INSERT INTO scenes(id, film_id, position, title) VALUES(${sceneId}, ${f.filmId}, 1, 'Scene 1')`;
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"A cinematic wide shot"}'::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
+    });
+
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 5,
+      executionMode: 'REPLAY',
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error?: { code: string } };
+    expect(body.error?.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
+  });
+
+  it('EP-05: LIVE attempt with MODELED_ONLY rate card is rejected with 422 UNVERIFIED_LIVE_RATE_CARD', async () => {
+    const f = await fixture('100', '25');
+    const modeledRateCardId = randomUUID();
+
+    await pgClient`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+      VALUES(${modeledRateCardId}, 'LOCAL_PAN_ZOOM', 'pan-zoom', 'TTS', 'FIXED_PER_REQUEST', 25, '2026-01-01', '2027-01-01', 'MODELED_ONLY (PRD illustrative example)')`;
+
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: null,
+      kind: 'TTS',
+      rateCardSnapshotId: modeledRateCardId,
+      pricingUnits: 1,
+      executionMode: 'LIVE',
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json() as { error?: { code: string } };
+    expect(body.error?.code).toBe('UNVERIFIED_LIVE_RATE_CARD');
+  });
 });
 

@@ -193,42 +193,53 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
       activePending = pendingAttempt;
     }
 
-    try {
-      const targetProvider = activePending ? activePending.provider : (kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider);
+    let record: PendingAttempt;
+    if (activePending) {
+      // RETRY: Send every field verbatim from the stored pending attempt
+      record = activePending;
+    } else {
+      // FRESH ATTEMPT: Derive from current workspace and selected provider
+      const targetProvider = kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider;
       const targetCard = rateCards.find(rc => rc.operation === kind && rc.provider === targetProvider);
       if (!targetCard) {
-        throw new Error(`No active rate card found for provider ${targetProvider} (${kind}). Generation aborted.`);
+        setGeneratingKind(null);
+        setGeneratingProgress(null);
+        setGenerationError(`No active rate card found for provider ${targetProvider} (${kind}). Generation aborted.`);
+        return;
       }
 
-      const idempotencyKey = activePending ? activePending.key : crypto.randomUUID();
-      const currentExecutionMode = activePending ? activePending.executionMode : executionMode;
-      const pricingUnits = activePending ? activePending.pricingUnits : (kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1);
-
-      const record: PendingAttempt = {
-        key: idempotencyKey,
+      record = {
+        key: crypto.randomUUID(),
         shotId: shot.id,
         shotRevisionId: shotRev.id,
         storyRevisionId: board.active.id,
         kind,
         provider: targetProvider,
         rateCardSnapshotId: targetCard.id,
-        pricingUnits,
-        executionMode: currentExecutionMode,
-        createdAt: activePending ? activePending.createdAt : Date.now(),
+        pricingUnits: kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1,
+        executionMode,
+        createdAt: Date.now(),
       };
 
+      // Persist to session storage BEFORE dispatch. If storage fails, abort to prevent untracked dispatch
       try {
         sessionStorage.setItem(attemptSlot, JSON.stringify(record));
         setPendingAttempt(record);
       } catch {
-        // Storage unreadable
+        setStorageBlocked(true);
+        setGeneratingKind(null);
+        setGeneratingProgress(null);
+        setGenerationError('Tab storage is unavailable. Cannot safely dispatch billable attempt without guaranteed retry identity.');
+        return;
       }
+    }
 
+    try {
       const res = await fetch(`${base}/attempts`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
+          'Idempotency-Key': record.key,
         },
         body: JSON.stringify({
           storyRevisionId: record.storyRevisionId,
