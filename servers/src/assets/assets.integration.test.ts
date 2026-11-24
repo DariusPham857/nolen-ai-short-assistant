@@ -515,7 +515,45 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     // Shot revision with OPTIONAL keyframe requirement
     const f = await createFixture({ keyframePolicy: 'OPTIONAL' });
 
-    // Dispatching VIDEO attempt without keyframe must SUCCEED directly
+    // 1. Dispatching image-driven VIDEO attempt without keyframe must be rejected with 409 KEYFRAME_APPROVAL_REQUIRED
+    const vidResBefore = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(vidResBefore.status).toBe(409);
+    const errBody = await vidResBefore.json() as { error?: { code: string } };
+    expect(errBody.error?.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
+
+    // 2. Synthesize and approve keyframe
+    const imgKey = randomUUID();
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': imgKey });
+    expect(imgRes.status).toBe(201);
+    const { attemptId: imgAttemptId } = await imgRes.json() as { attemptId: string };
+
+    const keyframeAsset = await fakeAssetProducer({
+      filmId: f.filmId,
+      attemptId: imgAttemptId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+    });
+
+    await request(`/api/assets/${keyframeAsset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+      reason: 'Approved keyframe for optional shot',
+    });
+
+    // 3. Dispatching VIDEO attempt with approved keyframe succeeds
     const vidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,

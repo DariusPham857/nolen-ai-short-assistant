@@ -7,6 +7,7 @@ import { admitAttempt } from '../financial/repository.js';
 import { startWorker, type WorkerOptions } from './index.js';
 import { WorkerLoopRunner } from './shutdown.js';
 import { relayOne, type BossContract } from '../financial/outbox.js';
+import { fakeAssetProducer } from '../assets/repository.js';
 
 const isLiveDb = Boolean(process.env.DATABASE_URL);
 const token = 'worker-test-operator-token-32b';
@@ -38,6 +39,7 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
     const runwayRateId = randomUUID();
     const ttsRateId = randomUUID();
     const assemblyRateId = randomUUID();
+    const keyframeAttemptId = randomUUID();
 
     await pgClient.begin(async tx => {
       // 1. Film & Budget
@@ -89,7 +91,23 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
         VALUES(${ttsRateId}, 'LOCAL_PAN_ZOOM', 'test-tts', 'TTS', 'FIXED_PER_REQUEST', 10000, '2026-01-01', '2027-01-01', 'tts-rate-snapshot')`;
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
         VALUES(${assemblyRateId}, 'LOCAL_PAN_ZOOM', 'test-assembly', 'ASSEMBLY', 'FIXED_PER_REQUEST', 20000, '2026-01-01', '2027-01-01', 'assembly-rate-snapshot')`;
+
+      // 5. Pre-seed keyframe attempt
+      await tx`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+        VALUES(${keyframeAttemptId}, ${filmId}, ${storyRevisionId}, ${shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${geminiRateId}, 1, 0, 'SUCCEEDED', 'REPLAY')`;
     });
+
+    // 6. Produce real keyframe asset on disk and approve it so image-driven video attempts succeed
+    const keyframeAsset = await fakeAssetProducer({
+      filmId,
+      attemptId: keyframeAttemptId,
+      shotRevisionId,
+      kind: 'IMAGE',
+    });
+    await pgClient`INSERT INTO shot_asset_selections(film_id, story_revision_id, shot_id, shot_revision_id, kind, asset_id, selected_by)
+      VALUES(${filmId}, ${storyRevisionId}, ${shotId}, ${shotRevisionId}, 'IMAGE', ${keyframeAsset.id}, 'local-operator')`;
+    await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
+      VALUES(${randomUUID()}, ${filmId}, ${keyframeAsset.id}, ${shotRevisionId}, 'APPROVED', 'local-operator', 'Approved keyframe fixture')`;
 
     return {
       filmId,

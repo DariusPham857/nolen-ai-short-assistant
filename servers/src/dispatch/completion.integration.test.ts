@@ -6,6 +6,7 @@ import { admitAttempt, resolveOutboxQueue } from '../financial/repository.js';
 import { completeReplayAttempt, handleUnsupportedKindAttempt } from './completion.js';
 import { storage } from '../lib/storage.js';
 import { resolveFixture } from '../fixtures/resolver.js';
+import { fakeAssetProducer } from '../assets/repository.js';
 
 const isLiveDb = Boolean(process.env.DATABASE_URL);
 const token = 'completion-test-operator-token-32b';
@@ -217,6 +218,21 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   // ───────────────────────────────────────────────────────────────────────────
   it('PD-AT-02a: completes REPLAY video attempt with Runway fixture, registers Asset and zero ledger events', async () => {
     const s = await seedTestSetup({ keyframePolicy: 'OPTIONAL' });
+
+    // Pre-seed approved keyframe for shot so image-driven video admission succeeds
+    const keyframeAttemptId = randomUUID();
+    await pgClient`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+      VALUES(${keyframeAttemptId}, ${s.filmId}, ${s.storyRevisionId}, ${s.shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${s.geminiRateId}, 1, 0, 'SUCCEEDED', 'REPLAY')`;
+    const keyframeAsset = await fakeAssetProducer({
+      filmId: s.filmId,
+      attemptId: keyframeAttemptId,
+      shotRevisionId: s.shotRevisionId,
+      kind: 'IMAGE',
+    });
+    await pgClient`INSERT INTO shot_asset_selections(film_id, story_revision_id, shot_id, shot_revision_id, kind, asset_id, selected_by)
+      VALUES(${s.filmId}, ${s.storyRevisionId}, ${s.shotId}, ${s.shotRevisionId}, 'IMAGE', ${keyframeAsset.id}, 'local-operator')`;
+    await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
+      VALUES(${randomUUID()}, ${s.filmId}, ${keyframeAsset.id}, ${s.shotRevisionId}, 'APPROVED', 'local-operator', 'Approved keyframe fixture')`;
 
     // Admit REPLAY VIDEO attempt
     const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {

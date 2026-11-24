@@ -557,7 +557,9 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     await pgClient.begin(async tx => {
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
         VALUES(${videoRateCardId}, 'RUNWAY', 'gen4_turbo', 'VIDEO', 'PER_SECOND', 50000, '2026-01-01', '2027-01-01', 'test runway rate')`;
-      await tx`INSERT INTO scenes(id, film_id, position, title) VALUES(${sceneId}, ${f.filmId}, 1, 'Scene 1')`;
+      await tx`INSERT INTO scenes(id, film_id) VALUES(${sceneId}, ${f.filmId})`;
+      await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
         VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"A cinematic wide shot"}'::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
