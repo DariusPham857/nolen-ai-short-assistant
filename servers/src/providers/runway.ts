@@ -36,7 +36,11 @@ export class FakeRunwayAdapter implements ProviderAdapter {
       providerJobId,
       state: 'SUCCEEDED',
       provenance: 'REPLAY_FIXTURE',
-      mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/runway-mock-video.mp4',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-runway-video-9-16',
+      },
       rawResponse: { model: 'gen4_turbo', duration: 4 },
     };
   }

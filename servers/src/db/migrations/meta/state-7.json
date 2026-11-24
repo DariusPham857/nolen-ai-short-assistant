@@ -1,0 +1,2990 @@
+{
+  "objects": [
+    {
+      "relname": "asset_reviews",
+      "relkind": "r"
+    },
+    {
+      "relname": "assets",
+      "relkind": "r"
+    },
+    {
+      "relname": "attempt_financial_state",
+      "relkind": "r"
+    },
+    {
+      "relname": "attempts",
+      "relkind": "r"
+    },
+    {
+      "relname": "budget_limit_events",
+      "relkind": "r"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "relkind": "r"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "relkind": "r"
+    },
+    {
+      "relname": "film_budget_accounts",
+      "relkind": "r"
+    },
+    {
+      "relname": "films",
+      "relkind": "r"
+    },
+    {
+      "relname": "financial_command_receipts",
+      "relkind": "r"
+    },
+    {
+      "relname": "operator_sessions",
+      "relkind": "r"
+    },
+    {
+      "relname": "outbound_dispatches",
+      "relkind": "r"
+    },
+    {
+      "relname": "rate_card_snapshots",
+      "relkind": "r"
+    },
+    {
+      "relname": "scenes",
+      "relkind": "r"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "relkind": "r"
+    },
+    {
+      "relname": "shot_revisions",
+      "relkind": "r"
+    },
+    {
+      "relname": "shots",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_approvals",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_mutation_receipts",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_revision_scenes",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_revision_shots",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_revisions",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_validations",
+      "relkind": "r"
+    },
+    {
+      "relname": "story_waivers",
+      "relkind": "r"
+    }
+  ],
+  "columns": [
+    {
+      "table_name": "asset_reviews",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "asset_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "film_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "shot_revision_id",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "actor_id",
+      "ordinal_position": 5,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "decision",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "reason",
+      "ordinal_position": 7,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "''::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "asset_reviews",
+      "column_name": "created_at",
+      "ordinal_position": 8,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "attempt_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "shot_revision_id",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "kind",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "storage_path",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "sha256_hash",
+      "ordinal_position": 7,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "assets",
+      "column_name": "mime_type",
+      "ordinal_position": 8,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "assets",
+      "column_name": "byte_size",
+      "ordinal_position": 9,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "verified",
+      "ordinal_position": 10,
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": "true",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "metadata",
+      "ordinal_position": 11,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": "'{}'::jsonb",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "assets",
+      "column_name": "created_at",
+      "ordinal_position": 12,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "attempt_id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "billing_status",
+      "ordinal_position": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'PENDING'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "reservation_open_usd_micros",
+      "ordinal_position": 3,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "realized_usd_micros",
+      "ordinal_position": 4,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "pending_liability_usd_micros",
+      "ordinal_position": 5,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "version",
+      "ordinal_position": 6,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempt_financial_state",
+      "column_name": "updated_at",
+      "ordinal_position": 7,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "story_revision_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "shot_revision_id",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "kind",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "provider",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "model",
+      "ordinal_position": 7,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "rate_card_snapshot_id",
+      "ordinal_position": 8,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "pricing_units",
+      "ordinal_position": 9,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "reservation_usd_micros",
+      "ordinal_position": 10,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "state",
+      "ordinal_position": 11,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'QUEUED'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "created_at",
+      "ordinal_position": 12,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "attempts",
+      "column_name": "execution_mode",
+      "ordinal_position": 13,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'REPLAY'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "actor_id",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "prior_limit_usd_micros",
+      "ordinal_position": 4,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "new_limit_usd_micros",
+      "ordinal_position": 5,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "reason",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "budget_limit_events",
+      "column_name": "created_at",
+      "ordinal_position": 7,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "attempt_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "event_type",
+      "ordinal_position": 4,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "amount_usd_micros",
+      "ordinal_position": 5,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "billing_status",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "evidence",
+      "ordinal_position": 7,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "cost_ledger_events",
+      "column_name": "created_at",
+      "ordinal_position": 8,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "attempt_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "queue_name",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "payload",
+      "ordinal_position": 4,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "status",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'PENDING'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "enqueue_outcome",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'NOT_ATTEMPTED'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "boss_job_id",
+      "ordinal_position": 7,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "lease_owner",
+      "ordinal_position": 8,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "lease_expires_at",
+      "ordinal_position": 9,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "retry_count",
+      "ordinal_position": 10,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "next_attempt_at",
+      "ordinal_position": 11,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "delivered_at",
+      "ordinal_position": 12,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "created_at",
+      "ordinal_position": 13,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "exhausted_at",
+      "ordinal_position": 14,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "dispatch_outbox",
+      "column_name": "last_error",
+      "ordinal_position": 15,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "film_id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "operator_id",
+      "ordinal_position": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "budget_limit_usd_micros",
+      "ordinal_position": 3,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "actual_spent_usd_micros",
+      "ordinal_position": 4,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "reserved_open_usd_micros",
+      "ordinal_position": 5,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "pending_liability_usd_micros",
+      "ordinal_position": 6,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "version",
+      "ordinal_position": 7,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "film_budget_accounts",
+      "column_name": "updated_at",
+      "ordinal_position": 8,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": "gen_random_uuid()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "title",
+      "ordinal_position": 2,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 255
+    },
+    {
+      "table_name": "films",
+      "column_name": "brief",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "status",
+      "ordinal_position": 4,
+      "data_type": "USER-DEFINED",
+      "udt_name": "film_status",
+      "is_nullable": "NO",
+      "column_default": "'DRAFT'::film_status",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "budget_limit_usd_micros",
+      "ordinal_position": 5,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "duration_target_seconds",
+      "ordinal_position": 6,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": "30",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "aspect_ratio",
+      "ordinal_position": 7,
+      "data_type": "USER-DEFINED",
+      "udt_name": "aspect_ratio",
+      "is_nullable": "NO",
+      "column_default": "'9:16'::aspect_ratio",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "style_notes",
+      "ordinal_position": 8,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "active_story_revision_id",
+      "ordinal_position": 9,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "operator_id",
+      "ordinal_position": 10,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "films",
+      "column_name": "idempotency_key",
+      "ordinal_position": 11,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "request_hash",
+      "ordinal_position": 12,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "films",
+      "column_name": "created_at",
+      "ordinal_position": 13,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "updated_at",
+      "ordinal_position": 14,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "films",
+      "column_name": "create_receipt",
+      "ordinal_position": 15,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "operator_id",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "key",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "command",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "request_hash",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "response",
+      "ordinal_position": 7,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "financial_command_receipts",
+      "column_name": "created_at",
+      "ordinal_position": 8,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "operator_sessions",
+      "column_name": "session_hash",
+      "ordinal_position": 1,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "operator_sessions",
+      "column_name": "operator_id",
+      "ordinal_position": 2,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "operator_sessions",
+      "column_name": "token_fingerprint",
+      "ordinal_position": 3,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "operator_sessions",
+      "column_name": "expires_at",
+      "ordinal_position": 4,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "attempt_id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "state",
+      "ordinal_position": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'NOT_STARTED'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "claim_token",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "provider_job_id",
+      "ordinal_position": 4,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "provider_request_fingerprint",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "claimed_at",
+      "ordinal_position": 6,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "outbound_dispatches",
+      "column_name": "updated_at",
+      "ordinal_position": 7,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "provider",
+      "ordinal_position": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "model",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "operation",
+      "ordinal_position": 4,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "rate_type",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "unit_price_usd_micros",
+      "ordinal_position": 6,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "provider_maximum_usd_micros",
+      "ordinal_position": 7,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "effective_at",
+      "ordinal_position": 8,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "expires_at",
+      "ordinal_position": 9,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "source_ref",
+      "ordinal_position": 10,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "rate_card_snapshots",
+      "column_name": "created_at",
+      "ordinal_position": 11,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "scenes",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "scenes",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "story_revision_id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "shot_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "kind",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "shot_revision_id",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "asset_id",
+      "ordinal_position": 5,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "film_id",
+      "ordinal_position": 6,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "selected_by",
+      "ordinal_position": 7,
+      "data_type": "character varying",
+      "udt_name": "varchar",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": 64
+    },
+    {
+      "table_name": "shot_asset_selections",
+      "column_name": "selected_at",
+      "ordinal_position": 8,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_revisions",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_revisions",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_revisions",
+      "column_name": "shot_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_revisions",
+      "column_name": "spec",
+      "ordinal_position": 4,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_revisions",
+      "column_name": "dependency_hash",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shot_revisions",
+      "column_name": "policy",
+      "ordinal_position": 6,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shots",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "shots",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_approvals",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_approvals",
+      "column_name": "story_revision_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_approvals",
+      "column_name": "evidence",
+      "ordinal_position": 3,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_mutation_receipts",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_mutation_receipts",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_mutation_receipts",
+      "column_name": "operator_id",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_mutation_receipts",
+      "column_name": "key",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_mutation_receipts",
+      "column_name": "request_hash",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_mutation_receipts",
+      "column_name": "response",
+      "ordinal_position": 6,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_scenes",
+      "column_name": "film_id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_scenes",
+      "column_name": "story_revision_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_scenes",
+      "column_name": "scene_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_scenes",
+      "column_name": "position",
+      "ordinal_position": 4,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_shots",
+      "column_name": "film_id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_shots",
+      "column_name": "story_revision_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_shots",
+      "column_name": "scene_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_shots",
+      "column_name": "shot_id",
+      "ordinal_position": 4,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_shots",
+      "column_name": "shot_revision_id",
+      "ordinal_position": 5,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revision_shots",
+      "column_name": "position",
+      "ordinal_position": 6,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "film_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "parent_id",
+      "ordinal_position": 3,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "revision_no",
+      "ordinal_position": 4,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "state",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'DRAFT'::text",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "state_version",
+      "ordinal_position": 6,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": "0",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "content",
+      "ordinal_position": 7,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "content_hash",
+      "ordinal_position": 8,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_revisions",
+      "column_name": "created_at",
+      "ordinal_position": 9,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_validations",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_validations",
+      "column_name": "story_revision_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_validations",
+      "column_name": "context",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_validations",
+      "column_name": "dependency_hash",
+      "ordinal_position": 4,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_validations",
+      "column_name": "rule_set_version",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_validations",
+      "column_name": "findings",
+      "ordinal_position": 6,
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "id",
+      "ordinal_position": 1,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "story_revision_id",
+      "ordinal_position": 2,
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "finding_fingerprint",
+      "ordinal_position": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "dependency_hash",
+      "ordinal_position": 4,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "actor_id",
+      "ordinal_position": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "reason",
+      "ordinal_position": 6,
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null,
+      "character_maximum_length": null
+    },
+    {
+      "table_name": "story_waivers",
+      "column_name": "created_at",
+      "ordinal_position": 7,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "now()",
+      "character_maximum_length": null
+    }
+  ],
+  "constraints": [
+    {
+      "relname": "asset_reviews",
+      "conname": "asset_review_decision_valid",
+      "contype": "c",
+      "definition": "CHECK ((decision = ANY (ARRAY['APPROVED'::text, 'REJECTED'::text])))"
+    },
+    {
+      "relname": "asset_reviews",
+      "conname": "asset_reviews_film_id_asset_id_shot_revision_id_assets_film_id_",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, asset_id, shot_revision_id) REFERENCES assets(film_id, id, shot_revision_id)"
+    },
+    {
+      "relname": "asset_reviews",
+      "conname": "asset_reviews_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "asset_reviews",
+      "conname": "asset_reviews_film_id_shot_revision_id_shot_revisions_film_id_i",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id) REFERENCES shot_revisions(film_id, id)"
+    },
+    {
+      "relname": "asset_reviews",
+      "conname": "asset_reviews_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "asset_byte_size_nonnegative",
+      "contype": "c",
+      "definition": "CHECK ((byte_size >= 0))"
+    },
+    {
+      "relname": "assets",
+      "conname": "asset_kind_valid",
+      "contype": "c",
+      "definition": "CHECK ((kind = ANY (ARRAY['IMAGE'::text, 'VIDEO'::text])))"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_attempt_id_attempts_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (attempt_id) REFERENCES attempts(id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_attempt_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (attempt_id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_id_shot_revision_id_kind_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_id_shot_revision_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id, shot_revision_id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_shot_revision_id_kind_attempt_id_attempts_film_i",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id, kind, attempt_id) REFERENCES attempts(film_id, shot_revision_id, kind, id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_film_id_shot_revision_id_shot_revisions_film_id_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id) REFERENCES shot_revisions(film_id, id)"
+    },
+    {
+      "relname": "assets",
+      "conname": "assets_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "attempt_financial_state",
+      "conname": "attempt_billing_status_valid",
+      "contype": "c",
+      "definition": "CHECK ((billing_status = ANY (ARRAY['PENDING'::text, 'PARTIAL'::text, 'FINAL'::text, 'DISPUTED'::text])))"
+    },
+    {
+      "relname": "attempt_financial_state",
+      "conname": "attempt_financial_nonnegative",
+      "contype": "c",
+      "definition": "CHECK (((reservation_open_usd_micros >= 0) AND (realized_usd_micros >= 0) AND (pending_liability_usd_micros >= 0) AND (version >= 0)))"
+    },
+    {
+      "relname": "attempt_financial_state",
+      "conname": "attempt_financial_pending_within_reserved",
+      "contype": "c",
+      "definition": "CHECK ((pending_liability_usd_micros <= reservation_open_usd_micros))"
+    },
+    {
+      "relname": "attempt_financial_state",
+      "conname": "attempt_financial_state_attempt_id_attempts_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (attempt_id) REFERENCES attempts(id)"
+    },
+    {
+      "relname": "attempt_financial_state",
+      "conname": "attempt_financial_state_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (attempt_id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempt_execution_mode_valid",
+      "contype": "c",
+      "definition": "CHECK ((execution_mode = ANY (ARRAY['LIVE'::text, 'REPLAY'::text])))"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempt_kind_valid",
+      "contype": "c",
+      "definition": "CHECK ((kind = ANY (ARRAY['IMAGE'::text, 'VIDEO'::text, 'TTS'::text, 'ASSEMBLY'::text])))"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempt_state_valid",
+      "contype": "c",
+      "definition": "CHECK ((state = ANY (ARRAY['QUEUED'::text, 'SUBMITTED'::text, 'SUBMISSION_UNCERTAIN'::text, 'RUNNING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELED'::text])))"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempt_values_valid",
+      "contype": "c",
+      "definition": "CHECK (((pricing_units > 0) AND (reservation_usd_micros >= 0)))"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_film_id_shot_revision_id_kind_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, shot_revision_id, kind, id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_film_id_shot_revision_id_shot_revisions_film_id_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id) REFERENCES shot_revisions(film_id, id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_film_id_story_revision_id_story_revisions_film_id_id_f",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, story_revision_id) REFERENCES story_revisions(film_id, id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_rate_card_snapshot_id_rate_card_snapshots_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (rate_card_snapshot_id) REFERENCES rate_card_snapshots(id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_shot_revision_id_shot_revisions_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (shot_revision_id) REFERENCES shot_revisions(id)"
+    },
+    {
+      "relname": "attempts",
+      "conname": "attempts_story_revision_id_story_revisions_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (story_revision_id) REFERENCES story_revisions(id)"
+    },
+    {
+      "relname": "budget_limit_events",
+      "conname": "budget_limit_event_reason_required",
+      "contype": "c",
+      "definition": "CHECK (((length(TRIM(BOTH FROM reason)) >= 1) AND (length(TRIM(BOTH FROM reason)) <= 1000)))"
+    },
+    {
+      "relname": "budget_limit_events",
+      "conname": "budget_limit_event_values_nonnegative",
+      "contype": "c",
+      "definition": "CHECK (((prior_limit_usd_micros >= 0) AND (new_limit_usd_micros >= 0)))"
+    },
+    {
+      "relname": "budget_limit_events",
+      "conname": "budget_limit_events_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "budget_limit_events",
+      "conname": "budget_limit_events_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "conname": "cost_ledger_events_attempt_id_attempts_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (attempt_id) REFERENCES attempts(id)"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "conname": "cost_ledger_events_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "conname": "cost_ledger_events_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "conname": "ledger_billing_status_valid",
+      "contype": "c",
+      "definition": "CHECK ((billing_status = ANY (ARRAY['PENDING'::text, 'PARTIAL'::text, 'FINAL'::text, 'DISPUTED'::text])))"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "conname": "ledger_event_type_valid",
+      "contype": "c",
+      "definition": "CHECK ((event_type = ANY (ARRAY['RESERVATION_CREATED'::text, 'CHARGE_POSTED'::text, 'RESERVATION_RELEASED'::text, 'CHARGE_CORRECTED'::text, 'RESERVATION_ADJUSTED'::text])))"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "conname": "ledger_nonzero_correction",
+      "contype": "c",
+      "definition": "CHECK (((event_type = ANY (ARRAY['CHARGE_CORRECTED'::text, 'RESERVATION_ADJUSTED'::text])) OR (amount_usd_micros >= 0)))"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "conname": "dispatch_outbox_attempt_id_attempts_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (attempt_id) REFERENCES attempts(id)"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "conname": "dispatch_outbox_attempt_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (attempt_id)"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "conname": "dispatch_outbox_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "conname": "dispatch_outbox_status_valid",
+      "contype": "c",
+      "definition": "CHECK ((status = ANY (ARRAY['PENDING'::text, 'DELIVERING'::text, 'DELIVERED'::text, 'EXHAUSTED'::text])))"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "conname": "dispatch_outcome_valid",
+      "contype": "c",
+      "definition": "CHECK ((enqueue_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'JOB_ID'::text, 'NULL_UNVERIFIED'::text, 'UNKNOWN_ENQUEUE_OUTCOME'::text, 'WORKER_CONFIRMED'::text])))"
+    },
+    {
+      "relname": "dispatch_outbox",
+      "conname": "dispatch_retry_nonnegative",
+      "contype": "c",
+      "definition": "CHECK ((retry_count >= 0))"
+    },
+    {
+      "relname": "film_budget_accounts",
+      "conname": "film_budget_accounts_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "film_budget_accounts",
+      "conname": "film_budget_accounts_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (film_id)"
+    },
+    {
+      "relname": "film_budget_accounts",
+      "conname": "film_budget_pending_within_reserved",
+      "contype": "c",
+      "definition": "CHECK ((pending_liability_usd_micros <= reserved_open_usd_micros))"
+    },
+    {
+      "relname": "film_budget_accounts",
+      "conname": "film_budget_projection_nonnegative",
+      "contype": "c",
+      "definition": "CHECK (((budget_limit_usd_micros >= 0) AND (actual_spent_usd_micros >= 0) AND (reserved_open_usd_micros >= 0) AND (pending_liability_usd_micros >= 0) AND (version >= 0)))"
+    },
+    {
+      "relname": "films",
+      "conname": "films_active_story_same_film",
+      "contype": "f",
+      "definition": "FOREIGN KEY (id, active_story_revision_id) REFERENCES story_revisions(film_id, id)"
+    },
+    {
+      "relname": "films",
+      "conname": "films_brief_bounds",
+      "contype": "c",
+      "definition": "CHECK (((length(TRIM(BOTH FROM brief)) >= 1) AND (length(TRIM(BOTH FROM brief)) <= 10000)))"
+    },
+    {
+      "relname": "films",
+      "conname": "films_budget_nonnegative",
+      "contype": "c",
+      "definition": "CHECK ((budget_limit_usd_micros >= 0))"
+    },
+    {
+      "relname": "films",
+      "conname": "films_duration_bounds",
+      "contype": "c",
+      "definition": "CHECK (((duration_target_seconds >= 30) AND (duration_target_seconds <= 60)))"
+    },
+    {
+      "relname": "films",
+      "conname": "films_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "films",
+      "conname": "films_style_bounds",
+      "contype": "c",
+      "definition": "CHECK (((style_notes IS NULL) OR (length(style_notes) <= 2000)))"
+    },
+    {
+      "relname": "films",
+      "conname": "films_title_required",
+      "contype": "c",
+      "definition": "CHECK ((length(TRIM(BOTH FROM title)) > 0))"
+    },
+    {
+      "relname": "financial_command_receipts",
+      "conname": "financial_command_receipts_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "financial_command_receipts",
+      "conname": "financial_command_receipts_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "financial_command_receipts",
+      "conname": "financial_receipt_key",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, operator_id, key)"
+    },
+    {
+      "relname": "operator_sessions",
+      "conname": "operator_sessions_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (session_hash)"
+    },
+    {
+      "relname": "outbound_dispatches",
+      "conname": "outbound_dispatch_state_valid",
+      "contype": "c",
+      "definition": "CHECK ((state = ANY (ARRAY['NOT_STARTED'::text, 'SUBMITTING'::text, 'SUBMITTED'::text, 'SUBMISSION_UNCERTAIN'::text, 'SUCCEEDED'::text, 'FAILED'::text])))"
+    },
+    {
+      "relname": "outbound_dispatches",
+      "conname": "outbound_dispatches_attempt_id_attempts_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (attempt_id) REFERENCES attempts(id)"
+    },
+    {
+      "relname": "outbound_dispatches",
+      "conname": "outbound_dispatches_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (attempt_id)"
+    },
+    {
+      "relname": "rate_card_snapshots",
+      "conname": "rate_card_snapshots_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "rate_card_snapshots",
+      "conname": "rate_card_type_valid",
+      "contype": "c",
+      "definition": "CHECK ((rate_type = ANY (ARRAY['FIXED_PER_REQUEST'::text, 'PER_SECOND'::text])))"
+    },
+    {
+      "relname": "rate_card_snapshots",
+      "conname": "rate_card_values_valid",
+      "contype": "c",
+      "definition": "CHECK (((unit_price_usd_micros >= 0) AND ((provider_maximum_usd_micros IS NULL) OR (provider_maximum_usd_micros >= 0)) AND (expires_at > effective_at)))"
+    },
+    {
+      "relname": "scenes",
+      "conname": "scenes_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "scenes",
+      "conname": "scenes_film_id_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id)"
+    },
+    {
+      "relname": "scenes",
+      "conname": "scenes_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "conname": "shot_asset_selection_kind_valid",
+      "contype": "c",
+      "definition": "CHECK ((kind = ANY (ARRAY['IMAGE'::text, 'VIDEO'::text])))"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "conname": "shot_asset_selections_film_id_asset_id_shot_revision_id_kind_as",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, asset_id, shot_revision_id, kind) REFERENCES assets(film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "conname": "shot_asset_selections_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "conname": "shot_asset_selections_film_id_shot_revision_id_shot_revisions_f",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_revision_id) REFERENCES shot_revisions(film_id, id)"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "conname": "shot_asset_selections_story_revision_id_shot_id_kind_unique",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id, shot_id, kind)"
+    },
+    {
+      "relname": "shot_asset_selections",
+      "conname": "shot_asset_selections_story_revision_id_shot_id_story_revision_",
+      "contype": "f",
+      "definition": "FOREIGN KEY (story_revision_id, shot_id) REFERENCES story_revision_shots(story_revision_id, shot_id)"
+    },
+    {
+      "relname": "shot_revisions",
+      "conname": "shot_revisions_film_id_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id)"
+    },
+    {
+      "relname": "shot_revisions",
+      "conname": "shot_revisions_film_id_shot_id_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, shot_id, id)"
+    },
+    {
+      "relname": "shot_revisions",
+      "conname": "shot_revisions_film_id_shot_id_shots_film_id_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_id) REFERENCES shots(film_id, id)"
+    },
+    {
+      "relname": "shot_revisions",
+      "conname": "shot_revisions_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "shots",
+      "conname": "shots_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "shots",
+      "conname": "shots_film_id_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id)"
+    },
+    {
+      "relname": "shots",
+      "conname": "shots_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "story_approvals",
+      "conname": "story_approvals_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "story_approvals",
+      "conname": "story_approvals_story_revision_id_story_revisions_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (story_revision_id) REFERENCES story_revisions(id)"
+    },
+    {
+      "relname": "story_approvals",
+      "conname": "story_approvals_story_revision_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id)"
+    },
+    {
+      "relname": "story_mutation_receipts",
+      "conname": "story_mutation_receipts_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "story_mutation_receipts",
+      "conname": "story_mutation_receipts_film_id_operator_id_key_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, operator_id, key)"
+    },
+    {
+      "relname": "story_mutation_receipts",
+      "conname": "story_mutation_receipts_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "story_revision_scenes",
+      "conname": "story_revision_scenes_film_id_scene_id_scenes_film_id_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, scene_id) REFERENCES scenes(film_id, id)"
+    },
+    {
+      "relname": "story_revision_scenes",
+      "conname": "story_revision_scenes_film_id_story_revision_id_scene_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, story_revision_id, scene_id)"
+    },
+    {
+      "relname": "story_revision_scenes",
+      "conname": "story_revision_scenes_film_id_story_revision_id_story_revisions",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, story_revision_id) REFERENCES story_revisions(film_id, id)"
+    },
+    {
+      "relname": "story_revision_scenes",
+      "conname": "story_revision_scenes_story_revision_id_position_unique",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id, \"position\")"
+    },
+    {
+      "relname": "story_revision_shots",
+      "conname": "story_revision_shots_film_id_shot_id_shot_revision_id_shot_revi",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, shot_id, shot_revision_id) REFERENCES shot_revisions(film_id, shot_id, id)"
+    },
+    {
+      "relname": "story_revision_shots",
+      "conname": "story_revision_shots_film_id_story_revision_id_scene_id_story_r",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, story_revision_id, scene_id) REFERENCES story_revision_scenes(film_id, story_revision_id, scene_id)"
+    },
+    {
+      "relname": "story_revision_shots",
+      "conname": "story_revision_shots_story_revision_id_scene_id_position_unique",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id, scene_id, \"position\")"
+    },
+    {
+      "relname": "story_revision_shots",
+      "conname": "story_revision_shots_story_revision_id_shot_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id, shot_id)"
+    },
+    {
+      "relname": "story_revisions",
+      "conname": "story_revisions_film_id_films_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id) REFERENCES films(id)"
+    },
+    {
+      "relname": "story_revisions",
+      "conname": "story_revisions_film_id_id_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, id)"
+    },
+    {
+      "relname": "story_revisions",
+      "conname": "story_revisions_film_id_parent_id_story_revisions_film_id_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (film_id, parent_id) REFERENCES story_revisions(film_id, id)"
+    },
+    {
+      "relname": "story_revisions",
+      "conname": "story_revisions_film_id_revision_no_unique",
+      "contype": "u",
+      "definition": "UNIQUE (film_id, revision_no)"
+    },
+    {
+      "relname": "story_revisions",
+      "conname": "story_revisions_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "story_revisions",
+      "conname": "story_state_valid",
+      "contype": "c",
+      "definition": "CHECK (((state = ANY (ARRAY['DRAFT'::text, 'PLANNED'::text, 'IN_REVIEW'::text, 'APPROVED'::text])) AND (state_version >= 0)))"
+    },
+    {
+      "relname": "story_validations",
+      "conname": "story_validations_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "story_validations",
+      "conname": "story_validations_story_revision_id_context_dependency_hash_rul",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id, context, dependency_hash, rule_set_version)"
+    },
+    {
+      "relname": "story_validations",
+      "conname": "story_validations_story_revision_id_story_revisions_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (story_revision_id) REFERENCES story_revisions(id)"
+    },
+    {
+      "relname": "story_waivers",
+      "conname": "story_waivers_pkey",
+      "contype": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "relname": "story_waivers",
+      "conname": "story_waivers_story_revision_id_finding_fingerprint_unique",
+      "contype": "u",
+      "definition": "UNIQUE (story_revision_id, finding_fingerprint)"
+    },
+    {
+      "relname": "story_waivers",
+      "conname": "story_waivers_story_revision_id_story_revisions_id_fk",
+      "contype": "f",
+      "definition": "FOREIGN KEY (story_revision_id) REFERENCES story_revisions(id)"
+    }
+  ],
+  "indexes": [
+    {
+      "tablename": "asset_reviews",
+      "indexname": "asset_reviews_latest_idx",
+      "indexdef": "CREATE INDEX asset_reviews_latest_idx ON public.asset_reviews USING btree (asset_id, created_at, id)"
+    },
+    {
+      "tablename": "asset_reviews",
+      "indexname": "asset_reviews_pkey",
+      "indexdef": "CREATE UNIQUE INDEX asset_reviews_pkey ON public.asset_reviews USING btree (id)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_attempt_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_attempt_id_unique ON public.assets USING btree (attempt_id)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_film_id_id_shot_revision_id_kind_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_shot_revision_id_kind_unique ON public.assets USING btree (film_id, id, shot_revision_id, kind)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_film_id_id_shot_revision_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_shot_revision_id_unique ON public.assets USING btree (film_id, id, shot_revision_id)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_film_id_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX assets_film_id_id_unique ON public.assets USING btree (film_id, id)"
+    },
+    {
+      "tablename": "assets",
+      "indexname": "assets_pkey",
+      "indexdef": "CREATE UNIQUE INDEX assets_pkey ON public.assets USING btree (id)"
+    },
+    {
+      "tablename": "attempt_financial_state",
+      "indexname": "attempt_financial_state_pkey",
+      "indexdef": "CREATE UNIQUE INDEX attempt_financial_state_pkey ON public.attempt_financial_state USING btree (attempt_id)"
+    },
+    {
+      "tablename": "attempts",
+      "indexname": "attempts_film_id_shot_revision_id_kind_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX attempts_film_id_shot_revision_id_kind_id_unique ON public.attempts USING btree (film_id, shot_revision_id, kind, id)"
+    },
+    {
+      "tablename": "attempts",
+      "indexname": "attempts_pkey",
+      "indexdef": "CREATE UNIQUE INDEX attempts_pkey ON public.attempts USING btree (id)"
+    },
+    {
+      "tablename": "budget_limit_events",
+      "indexname": "budget_limit_events_pkey",
+      "indexdef": "CREATE UNIQUE INDEX budget_limit_events_pkey ON public.budget_limit_events USING btree (id)"
+    },
+    {
+      "tablename": "cost_ledger_events",
+      "indexname": "cost_ledger_events_pkey",
+      "indexdef": "CREATE UNIQUE INDEX cost_ledger_events_pkey ON public.cost_ledger_events USING btree (id)"
+    },
+    {
+      "tablename": "dispatch_outbox",
+      "indexname": "dispatch_outbox_attempt_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX dispatch_outbox_attempt_id_unique ON public.dispatch_outbox USING btree (attempt_id)"
+    },
+    {
+      "tablename": "dispatch_outbox",
+      "indexname": "dispatch_outbox_pkey",
+      "indexdef": "CREATE UNIQUE INDEX dispatch_outbox_pkey ON public.dispatch_outbox USING btree (id)"
+    },
+    {
+      "tablename": "film_budget_accounts",
+      "indexname": "film_budget_accounts_pkey",
+      "indexdef": "CREATE UNIQUE INDEX film_budget_accounts_pkey ON public.film_budget_accounts USING btree (film_id)"
+    },
+    {
+      "tablename": "films",
+      "indexname": "films_operator_idempotency",
+      "indexdef": "CREATE UNIQUE INDEX films_operator_idempotency ON public.films USING btree (operator_id, idempotency_key)"
+    },
+    {
+      "tablename": "films",
+      "indexname": "films_pkey",
+      "indexdef": "CREATE UNIQUE INDEX films_pkey ON public.films USING btree (id)"
+    },
+    {
+      "tablename": "financial_command_receipts",
+      "indexname": "financial_command_receipts_pkey",
+      "indexdef": "CREATE UNIQUE INDEX financial_command_receipts_pkey ON public.financial_command_receipts USING btree (id)"
+    },
+    {
+      "tablename": "financial_command_receipts",
+      "indexname": "financial_receipt_key",
+      "indexdef": "CREATE UNIQUE INDEX financial_receipt_key ON public.financial_command_receipts USING btree (film_id, operator_id, key)"
+    },
+    {
+      "tablename": "operator_sessions",
+      "indexname": "operator_sessions_pkey",
+      "indexdef": "CREATE UNIQUE INDEX operator_sessions_pkey ON public.operator_sessions USING btree (session_hash)"
+    },
+    {
+      "tablename": "outbound_dispatches",
+      "indexname": "outbound_dispatches_pkey",
+      "indexdef": "CREATE UNIQUE INDEX outbound_dispatches_pkey ON public.outbound_dispatches USING btree (attempt_id)"
+    },
+    {
+      "tablename": "rate_card_snapshots",
+      "indexname": "rate_card_snapshots_pkey",
+      "indexdef": "CREATE UNIQUE INDEX rate_card_snapshots_pkey ON public.rate_card_snapshots USING btree (id)"
+    },
+    {
+      "tablename": "scenes",
+      "indexname": "scenes_film_id_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX scenes_film_id_id_unique ON public.scenes USING btree (film_id, id)"
+    },
+    {
+      "tablename": "scenes",
+      "indexname": "scenes_pkey",
+      "indexdef": "CREATE UNIQUE INDEX scenes_pkey ON public.scenes USING btree (id)"
+    },
+    {
+      "tablename": "shot_asset_selections",
+      "indexname": "shot_asset_selections_story_revision_id_shot_id_kind_unique",
+      "indexdef": "CREATE UNIQUE INDEX shot_asset_selections_story_revision_id_shot_id_kind_unique ON public.shot_asset_selections USING btree (story_revision_id, shot_id, kind)"
+    },
+    {
+      "tablename": "shot_revisions",
+      "indexname": "shot_revisions_film_id_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX shot_revisions_film_id_id_unique ON public.shot_revisions USING btree (film_id, id)"
+    },
+    {
+      "tablename": "shot_revisions",
+      "indexname": "shot_revisions_film_id_shot_id_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX shot_revisions_film_id_shot_id_id_unique ON public.shot_revisions USING btree (film_id, shot_id, id)"
+    },
+    {
+      "tablename": "shot_revisions",
+      "indexname": "shot_revisions_pkey",
+      "indexdef": "CREATE UNIQUE INDEX shot_revisions_pkey ON public.shot_revisions USING btree (id)"
+    },
+    {
+      "tablename": "shots",
+      "indexname": "shots_film_id_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX shots_film_id_id_unique ON public.shots USING btree (film_id, id)"
+    },
+    {
+      "tablename": "shots",
+      "indexname": "shots_pkey",
+      "indexdef": "CREATE UNIQUE INDEX shots_pkey ON public.shots USING btree (id)"
+    },
+    {
+      "tablename": "story_approvals",
+      "indexname": "story_approvals_pkey",
+      "indexdef": "CREATE UNIQUE INDEX story_approvals_pkey ON public.story_approvals USING btree (id)"
+    },
+    {
+      "tablename": "story_approvals",
+      "indexname": "story_approvals_story_revision_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_approvals_story_revision_id_unique ON public.story_approvals USING btree (story_revision_id)"
+    },
+    {
+      "tablename": "story_mutation_receipts",
+      "indexname": "story_mutation_receipts_film_id_operator_id_key_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_mutation_receipts_film_id_operator_id_key_unique ON public.story_mutation_receipts USING btree (film_id, operator_id, key)"
+    },
+    {
+      "tablename": "story_mutation_receipts",
+      "indexname": "story_mutation_receipts_pkey",
+      "indexdef": "CREATE UNIQUE INDEX story_mutation_receipts_pkey ON public.story_mutation_receipts USING btree (id)"
+    },
+    {
+      "tablename": "story_revision_scenes",
+      "indexname": "story_revision_scenes_film_id_story_revision_id_scene_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_revision_scenes_film_id_story_revision_id_scene_id_unique ON public.story_revision_scenes USING btree (film_id, story_revision_id, scene_id)"
+    },
+    {
+      "tablename": "story_revision_scenes",
+      "indexname": "story_revision_scenes_story_revision_id_position_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_revision_scenes_story_revision_id_position_unique ON public.story_revision_scenes USING btree (story_revision_id, \"position\")"
+    },
+    {
+      "tablename": "story_revision_shots",
+      "indexname": "story_revision_shots_story_revision_id_scene_id_position_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_revision_shots_story_revision_id_scene_id_position_unique ON public.story_revision_shots USING btree (story_revision_id, scene_id, \"position\")"
+    },
+    {
+      "tablename": "story_revision_shots",
+      "indexname": "story_revision_shots_story_revision_id_shot_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_revision_shots_story_revision_id_shot_id_unique ON public.story_revision_shots USING btree (story_revision_id, shot_id)"
+    },
+    {
+      "tablename": "story_revisions",
+      "indexname": "story_revisions_film_id_id_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_revisions_film_id_id_unique ON public.story_revisions USING btree (film_id, id)"
+    },
+    {
+      "tablename": "story_revisions",
+      "indexname": "story_revisions_film_id_revision_no_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_revisions_film_id_revision_no_unique ON public.story_revisions USING btree (film_id, revision_no)"
+    },
+    {
+      "tablename": "story_revisions",
+      "indexname": "story_revisions_pkey",
+      "indexdef": "CREATE UNIQUE INDEX story_revisions_pkey ON public.story_revisions USING btree (id)"
+    },
+    {
+      "tablename": "story_validations",
+      "indexname": "story_validations_pkey",
+      "indexdef": "CREATE UNIQUE INDEX story_validations_pkey ON public.story_validations USING btree (id)"
+    },
+    {
+      "tablename": "story_validations",
+      "indexname": "story_validations_story_revision_id_context_dependency_hash_rul",
+      "indexdef": "CREATE UNIQUE INDEX story_validations_story_revision_id_context_dependency_hash_rul ON public.story_validations USING btree (story_revision_id, context, dependency_hash, rule_set_version)"
+    },
+    {
+      "tablename": "story_waivers",
+      "indexname": "story_waivers_pkey",
+      "indexdef": "CREATE UNIQUE INDEX story_waivers_pkey ON public.story_waivers USING btree (id)"
+    },
+    {
+      "tablename": "story_waivers",
+      "indexname": "story_waivers_story_revision_id_finding_fingerprint_unique",
+      "indexdef": "CREATE UNIQUE INDEX story_waivers_story_revision_id_finding_fingerprint_unique ON public.story_waivers USING btree (story_revision_id, finding_fingerprint)"
+    }
+  ],
+  "enums": [
+    {
+      "typname": "aspect_ratio",
+      "enumlabel": "9:16",
+      "enumsortorder": 1
+    },
+    {
+      "typname": "aspect_ratio",
+      "enumlabel": "16:9",
+      "enumsortorder": 2
+    },
+    {
+      "typname": "aspect_ratio",
+      "enumlabel": "1:1",
+      "enumsortorder": 3
+    },
+    {
+      "typname": "aspect_ratio",
+      "enumlabel": "4:5",
+      "enumsortorder": 4
+    },
+    {
+      "typname": "film_status",
+      "enumlabel": "DRAFT",
+      "enumsortorder": 1
+    },
+    {
+      "typname": "film_status",
+      "enumlabel": "PLANNING",
+      "enumsortorder": 2
+    },
+    {
+      "typname": "film_status",
+      "enumlabel": "IN_PRODUCTION",
+      "enumsortorder": 3
+    },
+    {
+      "typname": "film_status",
+      "enumlabel": "COMPLETED",
+      "enumsortorder": 4
+    },
+    {
+      "typname": "film_status",
+      "enumlabel": "ARCHIVED",
+      "enumsortorder": 5
+    }
+  ],
+  "triggers": [
+    {
+      "relname": "asset_reviews",
+      "tgname": "kf_asset_reviews_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER kf_asset_reviews_append_only BEFORE DELETE OR UPDATE ON public.asset_reviews FOR EACH ROW EXECUTE FUNCTION kf_guard_append_only()"
+    },
+    {
+      "relname": "budget_limit_events",
+      "tgname": "fi_budget_limit_events_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER fi_budget_limit_events_append_only BEFORE DELETE OR UPDATE ON public.budget_limit_events FOR EACH ROW EXECUTE FUNCTION fi_guard_append_only()"
+    },
+    {
+      "relname": "cost_ledger_events",
+      "tgname": "fi_cost_ledger_events_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER fi_cost_ledger_events_append_only BEFORE DELETE OR UPDATE ON public.cost_ledger_events FOR EACH ROW EXECUTE FUNCTION fi_guard_append_only()"
+    },
+    {
+      "relname": "financial_command_receipts",
+      "tgname": "fi_financial_receipts_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER fi_financial_receipts_append_only BEFORE DELETE OR UPDATE ON public.financial_command_receipts FOR EACH ROW EXECUTE FUNCTION fi_guard_append_only()"
+    },
+    {
+      "relname": "rate_card_snapshots",
+      "tgname": "fi_rate_card_snapshots_append_only",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER fi_rate_card_snapshots_append_only BEFORE DELETE OR UPDATE ON public.rate_card_snapshots FOR EACH ROW EXECUTE FUNCTION fi_guard_append_only()"
+    },
+    {
+      "relname": "scenes",
+      "tgname": "sp_scenes_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_scenes_immutable BEFORE DELETE OR UPDATE ON public.scenes FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "shot_revisions",
+      "tgname": "sp_shot_revisions_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_shot_revisions_immutable BEFORE DELETE OR UPDATE ON public.shot_revisions FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "shots",
+      "tgname": "sp_shots_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_shots_immutable BEFORE DELETE OR UPDATE ON public.shots FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_approvals",
+      "tgname": "sp_story_approvals_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_story_approvals_immutable BEFORE DELETE OR UPDATE ON public.story_approvals FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_mutation_receipts",
+      "tgname": "sp_story_mutation_receipts_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_story_mutation_receipts_immutable BEFORE DELETE OR UPDATE ON public.story_mutation_receipts FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_revision_scenes",
+      "tgname": "sp_story_revision_scenes_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_story_revision_scenes_immutable BEFORE DELETE OR UPDATE ON public.story_revision_scenes FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_revision_shots",
+      "tgname": "sp_story_revision_shots_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_story_revision_shots_immutable BEFORE DELETE OR UPDATE ON public.story_revision_shots FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_revisions",
+      "tgname": "sp_revision_guard",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_revision_guard BEFORE DELETE OR UPDATE ON public.story_revisions FOR EACH ROW EXECUTE FUNCTION sp_guard_revision()"
+    },
+    {
+      "relname": "story_validations",
+      "tgname": "sp_story_validations_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_story_validations_immutable BEFORE DELETE OR UPDATE ON public.story_validations FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_waivers",
+      "tgname": "sp_story_waivers_immutable",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_story_waivers_immutable BEFORE DELETE OR UPDATE ON public.story_waivers FOR EACH ROW EXECUTE FUNCTION sp_guard_immutable()"
+    },
+    {
+      "relname": "story_waivers",
+      "tgname": "sp_waiver_insert_guard",
+      "tgenabled": "O",
+      "definition": "CREATE TRIGGER sp_waiver_insert_guard BEFORE INSERT ON public.story_waivers FOR EACH ROW EXECUTE FUNCTION sp_guard_waiver()"
+    }
+  ],
+  "functions": [
+    {
+      "proname": "fi_guard_append_only",
+      "definition": "CREATE OR REPLACE FUNCTION public.fi_guard_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'FI_APPEND_ONLY'; END $function$\n"
+    },
+    {
+      "proname": "kf_guard_append_only",
+      "definition": "CREATE OR REPLACE FUNCTION public.kf_guard_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'KF_APPEND_ONLY'; END $function$\n"
+    },
+    {
+      "proname": "sp_guard_immutable",
+      "definition": "CREATE OR REPLACE FUNCTION public.sp_guard_immutable()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'IMMUTABLE_HISTORY' USING ERRCODE='23514'; END $function$\n"
+    },
+    {
+      "proname": "sp_guard_revision",
+      "definition": "CREATE OR REPLACE FUNCTION public.sp_guard_revision()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n IF TG_OP='DELETE' THEN RAISE EXCEPTION 'IMMUTABLE_HISTORY' USING ERRCODE='23514'; END IF;\n IF (to_jsonb(NEW)-'state'-'state_version') IS DISTINCT FROM (to_jsonb(OLD)-'state'-'state_version') THEN\n  RAISE EXCEPTION 'IMMUTABLE_CREATIVE_CONTENT' USING ERRCODE='23514';\n END IF;\n IF OLD.state='APPROVED' OR NEW.state_version <> OLD.state_version+1 OR NOT (\n  (OLD.state=NEW.state AND OLD.state IN ('PLANNED','IN_REVIEW')) OR\n  (OLD.state='DRAFT' AND NEW.state='PLANNED') OR\n  (OLD.state='PLANNED' AND NEW.state='IN_REVIEW') OR\n  (OLD.state='IN_REVIEW' AND NEW.state='APPROVED')) THEN\n  RAISE EXCEPTION 'INVALID_STORY_TRANSITION' USING ERRCODE='23514';\n END IF;\n RETURN NEW;\nEND $function$\n"
+    },
+    {
+      "proname": "sp_guard_waiver",
+      "definition": "CREATE OR REPLACE FUNCTION public.sp_guard_waiver()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nDECLARE current_state text;\nBEGIN\n PERFORM 1 FROM films f JOIN story_revisions r ON r.film_id=f.id WHERE r.id=NEW.story_revision_id FOR UPDATE OF f;\n SELECT state INTO current_state FROM story_revisions WHERE id=NEW.story_revision_id;\n IF current_state NOT IN ('PLANNED','IN_REVIEW') OR NOT EXISTS(SELECT 1 FROM films WHERE active_story_revision_id=NEW.story_revision_id) THEN\n  RAISE EXCEPTION 'WAIVER_NOT_ALLOWED' USING ERRCODE='23514';\n END IF;\n RETURN NEW;\nEND $function$\n"
+    }
+  ]
+}

@@ -1,7 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { pgClient } from '../db/index.js';
 import type { ProviderAdapter } from '../providers/index.js';
-import type { GenerationRequest, SubmissionResult, ReconciliationResult } from '@nolen/contracts';
+import {
+  generationRequestSchema,
+  type GenerationRequest,
+  type SubmissionResult,
+  type ReconciliationResult,
+  type AssetLocator,
+} from '@nolen/contracts';
 import { assertSafeRemoteUrl } from '../lib/ssrf.js';
 
 export interface DispatchExecutionOptions {
@@ -24,7 +30,7 @@ export type DispatchOutcome =
   | { outcome: 'ALREADY_CLAIMED'; claimToken: null }
   | { outcome: 'SUBMITTED'; providerJobId: string }
   | { outcome: 'SUBMISSION_UNCERTAIN'; reason: string }
-  | { outcome: 'SUCCEEDED'; assetMediaUrl: string }
+  | { outcome: 'SUCCEEDED'; assetMediaUrl?: string; locator?: AssetLocator }
   | { outcome: 'FAILED'; error: string };
 
 /**
@@ -506,22 +512,32 @@ export async function dispatchAttempt(
   // Poll status to completion
   const status = await adapter.pollStatus(submission.providerJobId);
 
-  if (status.state === 'SUCCEEDED' && status.mediaUrl) {
-    // SSRF validation before asset download
-    try {
-      await assertSafeRemoteUrl(status.mediaUrl);
-    } catch (err: unknown) {
-      await pgClient`UPDATE outbound_dispatches SET state = 'SUBMISSION_UNCERTAIN', updated_at = now() WHERE attempt_id = ${attemptId}`;
+  if (status.state === 'SUCCEEDED') {
+    if (status.provenance === 'REPLAY_FIXTURE') {
       return {
-        outcome: 'FAILED',
-        error: `SSRF_BLOCKED: ${err instanceof Error ? err.message : String(err)}`,
+        outcome: 'SUCCEEDED',
+        locator: status.locator,
       };
     }
 
-    return {
-      outcome: 'SUCCEEDED',
-      assetMediaUrl: status.mediaUrl,
-    };
+    if (status.mediaUrl) {
+      // SSRF validation before asset download
+      try {
+        await assertSafeRemoteUrl(status.mediaUrl);
+      } catch (err: unknown) {
+        await pgClient`UPDATE outbound_dispatches SET state = 'SUBMISSION_UNCERTAIN', updated_at = now() WHERE attempt_id = ${attemptId}`;
+        return {
+          outcome: 'FAILED',
+          error: `SSRF_BLOCKED: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+
+      return {
+        outcome: 'SUCCEEDED',
+        assetMediaUrl: status.mediaUrl,
+        locator: status.locator,
+      };
+    }
   }
 
   return {
@@ -529,3 +545,68 @@ export async function dispatchAttempt(
     error: status.errorMessage ?? 'Provider generation failed',
   };
 }
+
+export interface DefaultFixtureQuery {
+  provider: string;
+  kind: string;
+  aspectRatio: string;
+}
+
+/**
+ * Deterministically serializes an arbitrary payload into a canonical JSON string.
+ * Omits undefined values and excludes 'requestFingerprint' to avoid self-referential hashing.
+ * Sorts object keys lexicographically.
+ */
+export function canonicalizePayload(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalizePayload).join(',')}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([k, v]) => v !== undefined && k !== 'requestFingerprint')
+    .sort(([a], [b]) => a.localeCompare(b, 'en'));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalizePayload(v)}`).join(',')}}`;
+}
+
+/**
+ * Computes 64-char lowercase hexadecimal SHA-256 digest of canonical request payload.
+ */
+export function computeRequestFingerprint(request: Record<string, unknown>): string {
+  return createHash('sha256').update(canonicalizePayload(request)).digest('hex');
+}
+
+/**
+ * Resolves deterministic default fixture for REPLAY when fixtureId is omitted by client (PD-AT-13).
+ */
+export function resolveDefaultFixture(query: DefaultFixtureQuery): { packVersion: string; fixtureId: string } {
+  const packVersion = 'v1';
+  const provider = query.provider.toLowerCase();
+  const kind = query.kind.toLowerCase();
+  const ratio = query.aspectRatio.replace(':', '-');
+  return {
+    packVersion,
+    fixtureId: `default-${provider}-${kind}-${ratio}`,
+  };
+}
+
+/**
+ * Freezes canonical GenerationRequest and computes 64-char hex requestFingerprint at admission (PD-AT-13).
+ */
+export function freezeGenerationRequestSnapshot(input: Record<string, unknown>): {
+  request: GenerationRequest;
+  requestFingerprint: string;
+} {
+  const parsed = generationRequestSchema.parse(input);
+  const fingerprint = computeRequestFingerprint(parsed);
+  const frozenRequest: GenerationRequest = {
+    ...parsed,
+    requestFingerprint: fingerprint,
+  };
+  return {
+    request: frozenRequest,
+    requestFingerprint: fingerprint,
+  };
+}
+

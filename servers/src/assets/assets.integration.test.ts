@@ -535,6 +535,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'IMAGE',
       rateCardSnapshotId: f.imageRateId,
       pricingUnits: 1,
+      executionMode: 'LIVE',
     }, { 'Idempotency-Key': randomUUID() });
     const { attemptId } = await imgRes.json() as { attemptId: string };
 

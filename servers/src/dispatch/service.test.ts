@@ -31,7 +31,11 @@ describe('Dispatch Service Contracts & Outcomes (PD-04 / BLOCK 1-3)', () => {
       providerJobId: 'gemini-job-123',
       state: 'SUCCEEDED',
       provenance: 'REPLAY_FIXTURE',
-      mediaUrl: 'https://storage.googleapis.com/test-bucket/asset.png',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-gemini-image-9-16',
+      },
     }),
     reconcile: vi.fn().mockResolvedValue({
       attemptId: mockRequest.attemptId,
@@ -54,7 +58,12 @@ describe('Dispatch Service Contracts & Outcomes (PD-04 / BLOCK 1-3)', () => {
     const status = await mockAdapter.pollStatus(submission.providerJobId);
     expect(status.state).toBe('SUCCEEDED');
     expect(status.provenance).toBe('REPLAY_FIXTURE');
-    expect(status.mediaUrl).toBe('https://storage.googleapis.com/test-bucket/asset.png');
+    expect(status.mediaUrl).toBeUndefined();
+    expect(status.locator).toEqual({
+      kind: 'REPLAY_FIXTURE',
+      packVersion: 'v1',
+      fixtureId: 'default-gemini-image-9-16',
+    });
 
     const reconciliation = await mockAdapter.reconcile(mockRequest.attemptId, submission.providerJobId);
     expect(reconciliation.outcome).toBe('CONFIRMED_SUCCEEDED');
@@ -137,5 +146,64 @@ describe('Dispatch Service Contracts & Outcomes (PD-04 / BLOCK 1-3)', () => {
 
     expect(result).toEqual({ state: 'SUBMISSION_UNCERTAIN', pendingLiabilityHeld: '500000' });
     beginSpy.mockRestore();
+  });
+
+  it('PD-AT-13: resolves deterministic default fixture and freezes snapshot at admission', async () => {
+    const { resolveDefaultFixture, freezeGenerationRequestSnapshot, computeRequestFingerprint } = await import('./service.js');
+
+    // 1. Resolve default fixture when fixtureId is omitted
+    const resolved = resolveDefaultFixture({
+      provider: 'GEMINI',
+      kind: 'IMAGE',
+      aspectRatio: '9:16',
+    });
+    expect(resolved.packVersion).toBe('v1');
+    expect(resolved.fixtureId).toBe('default-gemini-image-9-16');
+
+    // 2. Freeze snapshot with canonical SHA-256 hex requestFingerprint
+    const snapshot = freezeGenerationRequestSnapshot({
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      filmId: '22222222-2222-4222-8222-222222222222',
+      shotRevisionId: '33333333-3333-4333-8333-333333333333',
+      kind: 'IMAGE',
+      provider: 'GEMINI',
+      executionMode: 'REPLAY',
+      prompt: 'Establishing shot of futuristic Neo-Tokyo noodle bar',
+      aspectRatio: '9:16',
+      fixturePackVersion: resolved.packVersion,
+      fixtureId: resolved.fixtureId,
+    });
+
+    expect(snapshot.request.fixtureId).toBe('default-gemini-image-9-16');
+    expect(snapshot.request.fixturePackVersion).toBe('v1');
+
+    // Strict SHA-256 digest equality
+    const expectedDigest = computeRequestFingerprint(snapshot.request);
+    expect(snapshot.requestFingerprint).toBe(expectedDigest);
+    expect(snapshot.request.requestFingerprint).toBe(expectedDigest);
+    expect(snapshot.requestFingerprint).toMatch(/^[a-f0-9]{64}$/);
+
+    // Key-ordering independence
+    const reorderedInput = {
+      fixtureId: resolved.fixtureId,
+      prompt: 'Establishing shot of futuristic Neo-Tokyo noodle bar',
+      aspectRatio: '9:16' as const,
+      executionMode: 'REPLAY' as const,
+      kind: 'IMAGE' as const,
+      provider: 'GEMINI' as const,
+      fixturePackVersion: resolved.packVersion,
+      filmId: '22222222-2222-4222-8222-222222222222',
+      shotRevisionId: '33333333-3333-4333-8333-333333333333',
+      attemptId: '11111111-1111-4111-8111-111111111111',
+    };
+    const reorderedSnapshot = freezeGenerationRequestSnapshot(reorderedInput);
+    expect(reorderedSnapshot.requestFingerprint).toBe(snapshot.requestFingerprint);
+
+    // Sensitivity to payload changes (distinct payload yields distinct fingerprint)
+    const distinctSnapshot = freezeGenerationRequestSnapshot({
+      ...reorderedInput,
+      prompt: 'Distinct cinematic prompt: neon rain over Neo-Tokyo alleyway',
+    });
+    expect(distinctSnapshot.requestFingerprint).not.toBe(snapshot.requestFingerprint);
   });
 });

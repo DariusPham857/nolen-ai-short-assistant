@@ -36,7 +36,11 @@ export class FakeFalKlingAdapter implements ProviderAdapter {
       providerJobId,
       state: 'SUCCEEDED',
       provenance: 'REPLAY_FIXTURE',
-      mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/fal-kling-mock-video.mp4',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-fal_kling-video-9-16',
+      },
       rawResponse: { endpoint: 'fal-ai/kling-video/v3/pro/image-to-video' },
     };
   }

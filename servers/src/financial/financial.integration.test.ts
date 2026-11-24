@@ -1,13 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import PgBoss from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { apiErrorSchema, attemptFinancialDtoSchema, attemptReceiptSchema, moneyProjectionSchema } from '@nolen/contracts';
+import { apiErrorSchema, attemptFinancialDtoSchema, attemptReceiptSchema, moneyProjectionSchema, type GenerationRequest } from '@nolen/contracts';
 import { unlock } from '../auth/sessions.js';
 import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { createFinancialApi } from '../http/financial-api.js';
 import { claimProviderSubmission, relayOne } from './outbox.js';
 import { auditFinancialProjection } from './repository.js';
+import { canonicalizePayload } from '../dispatch/service.js';
 
 const token='financial-test-operator-token-at-least-32-bytes';
 const api=createFinancialApi();let cookie='';
@@ -27,11 +28,24 @@ async function fixture(budget='100',rate='25',rateType:'FIXED_PER_REQUEST'|'PER_
       await tx`INSERT INTO story_approvals(id,story_revision_id,evidence) VALUES(${randomUUID()},${storyRevisionId},${JSON.stringify({storyRevisionId,contentHash:'fixture',dependencyHash:approvalDependency,ruleSetVersion,validationRunId,waiverIds:[],waiverSetHash:'fixture-waivers',actorId:'local-operator',approvedAt:new Date().toISOString(),decision:'APPROVED'})}::jsonb)`;
     }
     await tx`INSERT INTO rate_card_snapshots(id,provider,model,operation,rate_type,unit_price_usd_micros,effective_at,expires_at,source_ref)
-      VALUES(${rateCardSnapshotId},'test-provider','test-model','TTS',${rateType},${rate},'2026-01-01','2027-01-01','test-only deterministic fixture')`;
+      VALUES(${rateCardSnapshotId},'LOCAL_PAN_ZOOM','test-model','TTS',${rateType},${rate},'2026-01-01','2027-01-01','test-only deterministic fixture')`;
   });
   return {filmId,storyRevisionId,rateCardSnapshotId};
 }
-function command(f:{filmId:string;storyRevisionId:string;rateCardSnapshotId:string},units=1){return {storyRevisionId:f.storyRevisionId,shotRevisionId:null,kind:'TTS',rateCardSnapshotId:f.rateCardSnapshotId,pricingUnits:units};}
+function command(
+  f: { filmId: string; storyRevisionId: string; rateCardSnapshotId: string },
+  units = 1,
+  executionMode: 'LIVE' | 'REPLAY' = 'LIVE',
+) {
+  return {
+    storyRevisionId: f.storyRevisionId,
+    shotRevisionId: null,
+    kind: 'TTS' as const,
+    rateCardSnapshotId: f.rateCardSnapshotId,
+    pricingUnits: units,
+    executionMode,
+  };
+}
 
 beforeAll(async()=>{process.env.OPERATOR_TOKEN=token;await migrateDatabase(process.env.DATABASE_URL!);cookie=`nolen_session=${await unlock(token)}`;});
 afterAll(async()=>{await pgClient.end();});
@@ -206,10 +220,12 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     const f=await fixture('100','10');const admitted=attemptReceiptSchema.parse(await (await request(`/api/films/${f.filmId}/attempts`,'POST',command(f))).json());
     await pgClient`UPDATE dispatch_outbox SET status='DELIVERED',enqueue_outcome='WORKER_CONFIRMED',delivered_at=now() WHERE attempt_id<>${admitted.attemptId}`;
     const schema=`fi_${randomUUID().replaceAll('-','').slice(0,20)}`;const boss=new PgBoss({connectionString:process.env.DATABASE_URL!,schema});boss.on('error',()=>undefined);
-    await boss.start();await boss.createQueue('generation:dispatch');
+    const [outboxRow] = await pgClient<{ queue_name: string }[]>`SELECT queue_name FROM dispatch_outbox WHERE attempt_id=${admitted.attemptId}`;
+    const queueName = outboxRow.queue_name;
+    await boss.start();await boss.createQueue(queueName);
     try{
       expect(await relayOne(boss,'test-relay')).toBe('DELIVERED');
-      expect(await boss.getJobById('generation:dispatch',admitted.attemptId,{includeArchive:true})).toBeTruthy();
+      expect(await boss.getJobById(queueName,admitted.attemptId,{includeArchive:true})).toBeTruthy();
       await pgClient`UPDATE dispatch_outbox SET status='PENDING',enqueue_outcome='NOT_ATTEMPTED',boss_job_id=NULL,next_attempt_at=now() WHERE attempt_id=${admitted.attemptId}`;
       expect(await relayOne(boss,'recovery-relay')).toBe('DELIVERED');
       const claims=await Promise.all(Array.from({length:20},()=>claimProviderSubmission(admitted.attemptId)));
@@ -229,6 +245,284 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     await pgClient`UPDATE dispatch_outbox SET status='DELIVERED',enqueue_outcome='WORKER_CONFIRMED',delivered_at=now() WHERE attempt_id<>${thrownAttempt.attemptId}`;
     expect(await relayOne({send:async()=>{throw new Error('ambiguous transport failure');},getJobById:async()=>null},'throw-relay')).toBe('RETRY');
     expect((await pgClient<{status:string;enqueue_outcome:string}[]>`SELECT status,enqueue_outcome FROM dispatch_outbox WHERE attempt_id=${thrownAttempt.attemptId}`)[0]).toMatchObject({status:'PENDING',enqueue_outcome:'UNKNOWN_ENQUEUE_OUTCOME'});
+  });
+
+  // Helper to establish a film in genuine deficit/overage (headroom < 0) via valid settlement
+  async function createOverageFilmFixture() {
+    const f = await fixture('100', '60');
+    const admitted = attemptReceiptSchema.parse(
+      await (await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        ...command(f, 1),
+        executionMode: 'LIVE',
+      })).json()
+    );
+    expect(admitted.billingStatus).toBe('PENDING');
+    const overage = {
+      billingStatus: 'FINAL',
+      realizedChargeUsdMicros: '120',
+      pendingLiabilityUsdMicros: '0',
+      evidenceRef: 'overage-settlement',
+      expectedVersion: 0,
+    };
+    const settleRes = await request(`/api/attempts/${admitted.attemptId}/reconcile`, 'POST', overage);
+    expect(settleRes.status).toBe(200);
+
+    const budget = moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/budget`)).json());
+    expect(BigInt(budget.headroomUsdMicros)).toBeLessThan(0n);
+    expect(budget.headroomUsdMicros).toBe('-20');
+    return f;
+  }
+
+  it('PD-AT-12a: rejects REPLAY under genuine negative headroom when StoryRevision is unapproved', async () => {
+    const f = await createOverageFilmFixture();
+    const unapprovedStoryId = randomUUID();
+    await pgClient`
+      INSERT INTO story_revisions(id, film_id, revision_no, state, content, content_hash)
+      VALUES(${unapprovedStoryId}, ${f.filmId}, 2, 'IN_REVIEW', '{}'::jsonb, 'unapproved-hash')
+    `;
+    await pgClient`UPDATE films SET active_story_revision_id = ${unapprovedStoryId} WHERE id = ${f.filmId}`;
+
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: unapprovedStoryId,
+      shotRevisionId: null,
+      kind: 'TTS',
+      rateCardSnapshotId: f.rateCardSnapshotId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error?: { code: string } };
+    expect(body.error?.code).toBe('CURRENT_APPROVAL_REQUIRED');
+  });
+
+  it('PD-AT-12b: rejects REPLAY under genuine negative headroom when VIDEO attempt lacks approved keyframe', async () => {
+    const f = await createOverageFilmFixture();
+    const sceneId = randomUUID();
+    const shotRevisionId = randomUUID();
+    const shotId = randomUUID();
+    const videoRateCardId = randomUUID();
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO scenes(id, film_id) VALUES(${sceneId}, ${f.filmId})`;
+      await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"Hero walking"}'::jsonb, 'dep-hash-1', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${videoRateCardId}, 'RUNWAY', 'gen4_turbo', 'VIDEO', 'FIXED_PER_REQUEST', 25, '2026-01-01', '2027-01-01', 'test fixture')`;
+    });
+
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error?: { code: string } };
+    expect(body.error?.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
+  });
+
+  it('PD-AT-12c: admits REPLAY under genuine negative headroom with zero reservation and zero ledger events', async () => {
+    const f = await createOverageFilmFixture();
+    const initialEvents = await pgClient`SELECT count(*) FROM cost_ledger_events WHERE film_id = ${f.filmId}`;
+    const initialCount = Number(initialEvents[0].count);
+
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      ...command(f, 1),
+      executionMode: 'REPLAY',
+    });
+    expect(res.status).toBe(201);
+    const admitted = attemptReceiptSchema.parse(await res.json());
+    expect(admitted.reservationUsdMicros).toBe('0');
+    expect(admitted.billingStatus).toBe('FINAL');
+
+    // Budget account reservation must NOT change
+    const budget = moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/budget`)).json());
+    expect(budget.reservedOpenUsdMicros).toBe('0');
+    expect(budget.headroomUsdMicros).toBe('-20');
+
+    // Cost ledger events must NOT change
+    const afterEvents = await pgClient`SELECT count(*) FROM cost_ledger_events WHERE film_id = ${f.filmId}`;
+    expect(Number(afterEvents[0].count)).toBe(initialCount);
+
+    // attempt_financial_state: reservation_open = '0', billing_status = 'FINAL' (consistent with receipt)
+    const [attemptFin] = await pgClient<{ reservation_open_usd_micros: string; billing_status: string }[]>`
+      SELECT reservation_open_usd_micros, billing_status FROM attempt_financial_state WHERE attempt_id = ${admitted.attemptId}
+    `;
+    expect(attemptFin.reservation_open_usd_micros).toBe('0');
+    expect(attemptFin.billing_status).toBe('FINAL');
+    expect(attemptFin.billing_status).toBe(admitted.billingStatus);
+  });
+
+  it('PD-AT-13: freezes deterministic default fixture identity and 64-char sha256 request snapshot into dispatch_outbox.payload at admission', async () => {
+    const f = await fixture('100', '25');
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      ...command(f, 1),
+      executionMode: 'REPLAY',
+    });
+    expect(res.status).toBe(201);
+    const admitted = attemptReceiptSchema.parse(await res.json());
+    expect(admitted.billingStatus).toBe('FINAL');
+
+    // 1. Inspect attempts table in PostgreSQL: execution_mode must be 'REPLAY' strictly
+    const [attRow] = await pgClient<{ execution_mode: string }[]>`
+      SELECT execution_mode FROM attempts WHERE id = ${admitted.attemptId}
+    `;
+    expect(attRow).toBeDefined();
+    expect(attRow.execution_mode).toBe('REPLAY');
+
+    // 2. Inspect dispatch_outbox table in PostgreSQL: payload must have frozen request & requestFingerprint
+    interface OutboxPayload {
+      request: GenerationRequest;
+      requestFingerprint: string;
+    }
+    const [outboxRow] = await pgClient<{ payload: OutboxPayload }[]>`
+      SELECT payload FROM dispatch_outbox WHERE attempt_id = ${admitted.attemptId}
+    `;
+    expect(outboxRow).toBeDefined();
+    expect(outboxRow.payload.request).toBeDefined();
+    expect(outboxRow.payload.request.attemptId).toBe(admitted.attemptId);
+    expect(outboxRow.payload.request.executionMode).toBe('REPLAY');
+    expect(outboxRow.payload.request.prompt).toBe('Financial fixture');
+    expect(outboxRow.payload.request.provider).toBe('LOCAL_PAN_ZOOM');
+    expect(outboxRow.payload.request.fixtureId).toBeDefined();
+    expect(outboxRow.payload.request.fixturePackVersion).toBe('v1');
+
+    // Strict SHA-256 digest equality with canonical request payload
+    const expectedDigest = createHash('sha256')
+      .update(canonicalizePayload(outboxRow.payload.request))
+      .digest('hex');
+    expect(outboxRow.payload.requestFingerprint).toBe(expectedDigest);
+    expect(outboxRow.payload.requestFingerprint).toMatch(/^[a-f0-9]{64}$/);
+
+    // Verify distinct request payloads produce distinct fingerprints
+    const res2 = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      ...command(f, 2),
+      executionMode: 'REPLAY',
+    });
+    expect(res2.status).toBe(201);
+    const admitted2 = attemptReceiptSchema.parse(await res2.json());
+    const [outboxRow2] = await pgClient<{ payload: OutboxPayload }[]>`
+      SELECT payload FROM dispatch_outbox WHERE attempt_id = ${admitted2.attemptId}
+    `;
+    expect(outboxRow2.payload.requestFingerprint).not.toBe(outboxRow.payload.requestFingerprint);
+    const expectedDigest2 = createHash('sha256')
+      .update(canonicalizePayload(outboxRow2.payload.request))
+      .digest('hex');
+    expect(outboxRow2.payload.requestFingerprint).toBe(expectedDigest2);
+  });
+
+  it('PD-AT-11: strictly forbids reconcileAttempt on REPLAY attempts with 409 REPLAY_ATTEMPT_NON_RECONCILABLE', async () => {
+    const f = await fixture('100', '25');
+    const replayAdmitRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      ...command(f, 1),
+      executionMode: 'REPLAY',
+    });
+    expect(replayAdmitRes.status).toBe(201);
+    const replayReceipt = attemptReceiptSchema.parse(await replayAdmitRes.json());
+    expect(replayReceipt.billingStatus).toBe('FINAL');
+
+    const reconcileRes = await request(`/api/attempts/${replayReceipt.attemptId}/reconcile`, 'POST', {
+      billingStatus: 'FINAL',
+      realizedChargeUsdMicros: '10',
+      pendingLiabilityUsdMicros: '0',
+      evidenceRef: 'invalid-replay-reconciliation',
+      expectedVersion: 0,
+    });
+    expect(reconcileRes.status).toBe(409);
+    const body = await reconcileRes.json() as { error?: { code: string } };
+    expect(body.error?.code).toBe('REPLAY_ATTEMPT_NON_RECONCILABLE');
+  });
+
+  it('PD-AT-13b: extracts authoritative prompt from ShotRevision or Film brief, and fails closed with 422 on unsupported provider or empty prompt', async () => {
+    const f = await fixture('100', '25');
+
+    // 1. Unsupported provider fails closed with 422 UNSUPPORTED_PROVIDER
+    const badRateId = randomUUID();
+    await pgClient`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+      VALUES(${badRateId}, 'UNSUPPORTED_AI_VENDOR', 'v1', 'TTS', 'FIXED_PER_REQUEST', 10, '2026-01-01', '2027-01-01', 'test fixture')`;
+    const resBadProv = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      ...command(f, 1),
+      rateCardSnapshotId: badRateId,
+    });
+    expect(resBadProv.status).toBe(422);
+    const bodyBadProv = await resBadProv.json() as { error?: { code: string } };
+    expect(bodyBadProv.error?.code).toBe('UNSUPPORTED_PROVIDER');
+
+    // 2. Authoritative prompt from ShotRevision
+    const sceneId = randomUUID();
+    const shotRevisionId = randomUUID();
+    const shotId = randomUUID();
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO scenes(id, film_id) VALUES(${sceneId}, ${f.filmId})`;
+      await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"Authoritative character prompt"}'::jsonb, 'dep-hash-2', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
+    });
+
+    const resShot = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'TTS',
+      rateCardSnapshotId: f.rateCardSnapshotId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    });
+    expect(resShot.status).toBe(201);
+    const shotAdmitted = attemptReceiptSchema.parse(await resShot.json());
+    const [shotOutbox] = await pgClient<{ payload: { request: GenerationRequest } }[]>`
+      SELECT payload FROM dispatch_outbox WHERE attempt_id = ${shotAdmitted.attemptId}
+    `;
+    expect(shotOutbox.payload.request.prompt).toBe('Authoritative character prompt');
+
+    // 3. Empty prompt fails closed with 422 EMPTY_PROMPT
+    const emptyShotRevId = randomUUID();
+    const emptyShotId = randomUUID();
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO shots(id, film_id) VALUES(${emptyShotId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${emptyShotRevId}, ${f.filmId}, ${emptyShotId}, '{"prompt":"   "}'::jsonb, 'dep-hash-3', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${emptyShotId}, ${emptyShotRevId}, 2)`;
+    });
+    const resEmpty = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: emptyShotRevId,
+      kind: 'TTS',
+      rateCardSnapshotId: f.rateCardSnapshotId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    });
+    expect(resEmpty.status).toBe(422);
+    const bodyEmpty = await resEmpty.json() as { error?: { code: string } };
+    expect(bodyEmpty.error?.code).toBe('EMPTY_PROMPT');
+  });
+
+  it('BLOCK 2: rejects admission when fixturePackVersion contains directory traversal with 422', async () => {
+    const f = await fixture('100', '25');
+    const traversalPayloads = [
+      'x/../replay-pack-v1',
+      '../v1',
+      '/v1',
+      'v1/..',
+    ];
+
+    for (const fixturePackVersion of traversalPayloads) {
+      const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        ...command(f, 1, 'REPLAY'),
+        fixturePackVersion,
+      });
+      expect(res.status).toBe(422);
+    }
   });
 });
 

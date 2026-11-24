@@ -10,7 +10,25 @@ export const signedMicrosSchema = z.string().regex(/^-?(0|[1-9]\d*)$/).refine(va
 }, 'Money exceeds BIGINT range');
 
 export const attemptKindSchema = z.enum(['IMAGE', 'VIDEO', 'TTS', 'ASSEMBLY']);
+export const executionModeSchema = z.enum(['LIVE', 'REPLAY']);
 export const billingStatusSchema = z.enum(['PENDING', 'PARTIAL', 'FINAL', 'DISPUTED']);
+
+export const fixturePackVersionSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/, {
+    message: 'fixturePackVersion must start with alphanumeric and contain only lowercase letters, digits, dots, underscores, or hyphens (max 64 chars)',
+  })
+  .refine(v => !v.includes('..') && !v.includes('/') && !v.includes('\\'), {
+    message: 'fixturePackVersion cannot contain path traversal or slashes',
+  });
+
+export const fixtureIdSchema = z
+  .string()
+  .regex(/^[a-z0-9_-]+$/, {
+    message: 'fixtureId must contain only lowercase letters, digits, underscores, or hyphens',
+  })
+  .min(1)
+  .max(128);
 
 export const estimateAttemptSchema = z.object({
   rateCardSnapshotId: z.string().uuid(),
@@ -21,7 +39,27 @@ export const createAttemptSchema = estimateAttemptSchema.extend({
   storyRevisionId: z.string().uuid(),
   shotRevisionId: z.string().uuid().nullable().optional().default(null),
   kind: attemptKindSchema,
-}).strict();
+  executionMode: executionModeSchema.optional().default('REPLAY'),
+  fixtureId: fixtureIdSchema.optional(),
+  fixturePackVersion: fixturePackVersionSchema.optional(),
+}).strict().superRefine((data, ctx) => {
+  if (data.executionMode === 'LIVE') {
+    if (data.fixtureId !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'LIVE mode strictly forbids fixtureId',
+        path: ['fixtureId'],
+      });
+    }
+    if (data.fixturePackVersion !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'LIVE mode strictly forbids fixturePackVersion',
+        path: ['fixturePackVersion'],
+      });
+    }
+  }
+});
 
 export const updateBudgetSchema = z.object({
   budgetLimitUsdMicros: microsSchema,
@@ -61,10 +99,11 @@ export const attemptReceiptSchema = z.object({
   attemptId: z.string().uuid(),
   filmId: z.string().uuid(),
   state: z.literal('QUEUED'),
-  billingStatus: z.literal('PENDING'),
+  billingStatus: z.enum(['PENDING', 'FINAL']),
   reservationUsdMicros: microsSchema,
   outboxStatus: z.literal('PENDING'),
 });
+export type AttemptReceipt = z.infer<typeof attemptReceiptSchema>;
 
 export const attemptFinancialDtoSchema = z.object({
   attemptId: z.string().uuid(),

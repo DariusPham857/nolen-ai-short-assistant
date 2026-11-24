@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type postgres from 'postgres';
-import type { CreateAttempt, EstimateAttempt, ReconcileAttempt, UpdateBudget } from '@nolen/contracts';
+import type { CreateAttempt, EstimateAttempt, ProviderKind, ReconcileAttempt, UpdateBudget } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { ApiFailure } from '../http/errors.js';
 import { RULESET } from '../stories/domain.js';
 import { storage, type AssetCategory } from '../lib/storage.js';
 import { add, assertAdmission, estimate, projection, subtract, type Projection, type Rate } from './domain.js';
+import { freezeGenerationRequestSnapshot, resolveDefaultFixture } from '../dispatch/service.js';
 
 type Tx = postgres.TransactionSql;
 type AccountRow = {
@@ -30,7 +31,7 @@ type FinancialRow = {
 };
 
 export type AttemptReceipt = {
-  attemptId: string; filmId: string; state: 'QUEUED'; billingStatus: 'PENDING';
+  attemptId: string; filmId: string; state: 'QUEUED'; billingStatus: 'PENDING' | 'FINAL';
   reservationUsdMicros: string; outboxStatus: 'PENDING';
 };
 
@@ -41,6 +42,13 @@ function digest(value: unknown): string {
 function accountProjection(row: AccountRow): Projection {
   return { budgetLimitUsdMicros: BigInt(row.budget_limit_usd_micros), actualSpentUsdMicros: BigInt(row.actual_spent_usd_micros),
     reservedOpenUsdMicros: BigInt(row.reserved_open_usd_micros), pendingLiabilityUsdMicros: BigInt(row.pending_liability_usd_micros) };
+}
+
+export function resolveOutboxQueue(kind: string, executionMode: 'LIVE' | 'REPLAY'): string {
+  const prefix = executionMode === 'REPLAY' ? 'replay' : 'live';
+  if (kind === 'TTS') return `${prefix}:tts:dispatch`;
+  if (kind === 'ASSEMBLY') return `${prefix}:assembly:dispatch`;
+  return `${prefix}:generation:dispatch`;
 }
 
 function projectionDto(row: AccountRow) {
@@ -190,19 +198,79 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
     const rate=await loadRate(tx,input.rateCardSnapshotId);
     if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');
     const calculated=estimate(rateValue(rate),input.pricingUnits);
-    assertAdmission(accountProjection(account),calculated.reservationUsdMicros);
-    const committed=add(BigInt(account.actual_spent_usd_micros),BigInt(account.reserved_open_usd_micros),calculated.reservationUsdMicros);
-    if(committed>BigInt(account.budget_limit_usd_micros))throw new ApiFailure(409,'BUDGET_EXCEEDED','Budget reservation would exceed the Film limit');
+    const executionMode = input.executionMode ?? 'REPLAY';
+    const isReplay = executionMode === 'REPLAY';
+
+    let reservationValue: string;
+    if (isReplay) {
+      reservationValue = '0';
+    } else {
+      assertAdmission(accountProjection(account),calculated.reservationUsdMicros);
+      const committed=add(BigInt(account.actual_spent_usd_micros),BigInt(account.reserved_open_usd_micros),calculated.reservationUsdMicros);
+      if(committed>BigInt(account.budget_limit_usd_micros))throw new ApiFailure(409,'BUDGET_EXCEEDED','Budget reservation would exceed the Film limit');
+      reservationValue=calculated.reservationUsdMicros.toString();
+    }
     const attemptId=randomUUID();
-    const reservationValue=calculated.reservationUsdMicros.toString();
-    await tx`INSERT INTO attempts(id,film_id,story_revision_id,shot_revision_id,kind,provider,model,rate_card_snapshot_id,pricing_units,reservation_usd_micros)
-      VALUES(${attemptId},${filmId},${input.storyRevisionId},${input.shotRevisionId},${input.kind},${rate.provider},${rate.model},${rate.id},${input.pricingUnits},${reservationValue})`;
-    await tx`INSERT INTO attempt_financial_state(attempt_id,reservation_open_usd_micros) VALUES(${attemptId},${reservationValue})`;
-    await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at)
+    await tx`INSERT INTO attempts(id,film_id,story_revision_id,shot_revision_id,kind,provider,model,rate_card_snapshot_id,pricing_units,reservation_usd_micros,execution_mode)
+      VALUES(${attemptId},${filmId},${input.storyRevisionId},${input.shotRevisionId},${input.kind},${rate.provider},${rate.model},${rate.id},${input.pricingUnits},${reservationValue},${executionMode})`;
+
+    if (isReplay) {
+      await tx`INSERT INTO attempt_financial_state(attempt_id,reservation_open_usd_micros,billing_status) VALUES(${attemptId},'0','FINAL')`;
+    } else {
+      await tx`INSERT INTO attempt_financial_state(attempt_id,reservation_open_usd_micros) VALUES(${attemptId},${reservationValue})`;
+      await tx`INSERT INTO cost_ledger_events(id,film_id,attempt_id,event_type,amount_usd_micros,billing_status,evidence,created_at)
       VALUES(${randomUUID()},${filmId},${attemptId},'RESERVATION_CREATED',${reservationValue},'PENDING',${JSON.stringify({rateCardSnapshotId:rate.id,pricingUnits:input.pricingUnits})}::jsonb,clock_timestamp())`;
-    await tx`UPDATE film_budget_accounts SET reserved_open_usd_micros=reserved_open_usd_micros+${reservationValue},version=version+1,updated_at=now() WHERE film_id=${filmId}`;
-    await tx`INSERT INTO dispatch_outbox(id,attempt_id,queue_name,payload) VALUES(${randomUUID()},${attemptId},'generation:dispatch',${JSON.stringify({attemptId})}::jsonb)`;
-    const response:AttemptReceipt={attemptId,filmId,state:'QUEUED',billingStatus:'PENDING',reservationUsdMicros:calculated.reservationUsdMicros.toString(),outboxStatus:'PENDING'};
+      await tx`UPDATE film_budget_accounts SET reserved_open_usd_micros=reserved_open_usd_micros+${reservationValue},version=version+1,updated_at=now() WHERE film_id=${filmId}`;
+    }
+
+    const rawProvider = rate.provider.toUpperCase().replace(/[-.]/g, '_');
+    let provider: ProviderKind;
+    if (rawProvider === 'GOOGLE' || rawProvider === 'GEMINI') provider = 'GEMINI';
+    else if (rawProvider === 'RUNWAY') provider = 'RUNWAY';
+    else if (rawProvider === 'FAL_AI' || rawProvider === 'FAL_KLING') provider = 'FAL_KLING';
+    else if (rawProvider === 'LOCAL_PAN_ZOOM') provider = 'LOCAL_PAN_ZOOM';
+    else throw new ApiFailure(422, 'UNSUPPORTED_PROVIDER', `Unsupported rate card provider: ${rate.provider}`);
+
+    let prompt = '';
+    if (input.shotRevisionId) {
+      const [sr] = await tx<{ spec: { prompt?: string } }[]>`SELECT spec FROM shot_revisions WHERE id = ${input.shotRevisionId} AND film_id = ${filmId}`;
+      prompt = sr?.spec?.prompt ?? '';
+    } else {
+      const [film] = await tx<{ brief: string }[]>`SELECT brief FROM films WHERE id = ${filmId}`;
+      prompt = film?.brief ?? '';
+    }
+    if (!prompt.trim()) {
+      throw new ApiFailure(422, 'EMPTY_PROMPT', 'Attempt requires a non-empty prompt from ShotRevision or Film brief');
+    }
+
+    const defaultFixture = isReplay && !input.fixtureId
+      ? resolveDefaultFixture({ provider, kind: input.kind, aspectRatio: '9:16' })
+      : null;
+
+    const snapshot = freezeGenerationRequestSnapshot({
+      attemptId,
+      filmId,
+      shotRevisionId: input.shotRevisionId ?? null,
+      kind: input.kind,
+      provider,
+      executionMode,
+      prompt: prompt.trim(),
+      aspectRatio: '9:16',
+      fixturePackVersion: input.fixturePackVersion ?? defaultFixture?.packVersion,
+      fixtureId: input.fixtureId ?? defaultFixture?.fixtureId,
+    });
+
+    const queueName = resolveOutboxQueue(input.kind, executionMode);
+    await tx`INSERT INTO dispatch_outbox(id,attempt_id,queue_name,payload) VALUES(${randomUUID()},${attemptId},${queueName},${JSON.stringify(snapshot)}::jsonb)`;
+    const billingStatus = isReplay ? 'FINAL' : 'PENDING';
+    const response: AttemptReceipt = {
+      attemptId,
+      filmId,
+      state: 'QUEUED',
+      billingStatus,
+      reservationUsdMicros: reservationValue,
+      outboxStatus: 'PENDING',
+    };
     await saveReceipt(tx,filmId,operatorId,key,'ADMIT_ATTEMPT',requestHash,response);return response;
   });
 }
@@ -223,8 +291,11 @@ export async function readAttemptFinancial(attemptId:string,operatorId:string){r
 export async function reconcileAttempt(attemptId:string,operatorId:string,key:string,input:ReconcileAttempt){
   const requestHash=digest(input);
   return pgClient.begin('isolation level read committed',async tx=>{
-    const [attempt]=await tx<{film_id:string}[]>`SELECT a.film_id FROM attempts a JOIN films f ON f.id=a.film_id WHERE a.id=${attemptId} AND f.operator_id=${operatorId}`;
+    const [attempt]=await tx<{film_id:string; execution_mode:string}[]>`SELECT a.film_id, a.execution_mode FROM attempts a JOIN films f ON f.id=a.film_id WHERE a.id=${attemptId} AND f.operator_id=${operatorId}`;
     if(!attempt)throw new ApiFailure(404,'ATTEMPT_NOT_FOUND','Attempt not found');
+    if(attempt.execution_mode === 'REPLAY'){
+      throw new ApiFailure(409, 'REPLAY_ATTEMPT_NON_RECONCILABLE', 'Replay attempts cannot be financially reconciled');
+    }
     const account=await ownedAccount(tx,attempt.film_id,operatorId,true);const current=await financialRow(tx,attemptId,operatorId,true);
     const replay=await receipt<ReturnType<typeof financialDto>>(tx,current.film_id,operatorId,key,'RECONCILE_ATTEMPT',requestHash);if(replay)return replay;
     if(current.version!==input.expectedVersion)throw new ApiFailure(409,'VERSION_CONFLICT','Attempt financial state changed; reload before reconciling');

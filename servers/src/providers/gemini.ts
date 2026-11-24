@@ -36,7 +36,11 @@ export class FakeGeminiAdapter implements ProviderAdapter {
       providerJobId,
       state: 'SUCCEEDED',
       provenance: 'REPLAY_FIXTURE',
-      mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/gemini-mock-keyframe.png',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-gemini-image-9-16',
+      },
       rawResponse: { model: 'gemini-3.1-flash-image', seed: 42 },
     };
   }
