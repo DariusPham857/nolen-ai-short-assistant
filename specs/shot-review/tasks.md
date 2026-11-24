@@ -1,19 +1,19 @@
 # EP-05 Tasks: Shot Video Generation, Attempt History & Review Workstation (T-026, T-027)
 
-Status: IN_PROGRESS
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [approved specification](spec.md)
 
 ## Tasks
 
-| Task | Scope and dependency | Verification / acceptance |
-|---|---|---|
-| EP05-01 | Freeze specification, link contracts, and record dependencies | `pnpm check:evidence`, `spec.md` valid |
-| EP05-02 | Add `@nolen/contracts` schemas: `selectShotAssetSchema` and `shotAttemptDtoSchema` | `pnpm --filter @nolen/contracts test` (18/18 PASS) |
-| EP05-03 | Backend repository methods: `selectShotAsset`, `getShotAttempts`, read-only `listRateCards` | PG16 integration tests in `assets.integration.test.ts` & `financial.integration.test.ts` |
-| EP05-04 | Authenticated API routes: `/selections`, `/attempts`, and read-only `/api/rate-cards` | 401 unauthenticated check, read-only assertion (EP05-AT-04) |
-| EP05-05 | Storyboard workstation UI: exact provider selection, keyframe gating, preserved retry identity | E2E Playwright test `tests/e2e/shot-review.spec.ts` |
-| EP05-06 | `VideoReviewModal`: 9:16 viewport, attempt history, approve/reject/set active controls | E2E Playwright test `tests/e2e/shot-review.spec.ts` |
-| EP05-07 | Full quality gates, evidence verification, and PR handoff | `pnpm test`, `typecheck`, `lint`, `test:guardrails`, `check:evidence` |
+| Task | Scope and dependency | Verification / acceptance | Status |
+|---|---|---|---|
+| EP05-01 | Freeze specification, link contracts, and record dependencies | `pnpm check:evidence`, `spec.md` valid | DONE |
+| EP05-02 | Add `@nolen/contracts` schemas: `selectShotAssetSchema` and `shotAttemptDtoSchema` | `pnpm --filter @nolen/contracts test` (18/18 PASS) | DONE |
+| EP05-03 | Backend repository methods: `selectShotAsset`, `getShotAttempts`, read-only `listRateCards` | PG16 integration tests in `assets.integration.test.ts` & `financial.integration.test.ts` (38/38 PASS) | DONE |
+| EP05-04 | Authenticated API routes: `/selections`, `/attempts`, and read-only `/api/rate-cards` | 401 unauthenticated check, read-only assertion (EP05-AT-04) | DONE |
+| EP05-05 | Storyboard workstation UI: exact provider selection, keyframe gating, preserved retry identity | E2E Playwright test `tests/e2e/shot-review.spec.ts` (4/4 PASS) | DONE |
+| EP05-06 | `VideoReviewModal`: 9:16 viewport, attempt history, approve/reject/set active controls | E2E Playwright test `tests/e2e/shot-review.spec.ts` (4/4 PASS) | DONE |
+| EP05-07 | Full quality gates, evidence verification, and PR handoff | `pnpm test` (76/76 PASS), `typecheck` (0 errors), `test:guardrails` (4/4 PASS), `check:evidence` (30/30 PASS), PG16 integration (88/88 PASS) | DONE |
 
 ## Handoff
 

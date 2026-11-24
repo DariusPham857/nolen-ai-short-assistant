@@ -1,6 +1,6 @@
 # EP-05 — Shot Video Generation, Attempt History & Review Workstation (T-026, T-027)
 
-Status: IN_PROGRESS
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [PRD v1.0 §19, §25, §29, §30.3](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md)
 
 ## Goal
@@ -39,6 +39,28 @@ Source: [PRD v1.0 §19, §25, §29, §30.3](../../docs/PRD/PRD_AI_Short_Film_Ass
 - `EP05-AT-03` (Retry Identity Persistence): Aborted or dropped attempt requests retain their idempotency key in storage; the recovery banner offers "Retry same attempt" with the exact same key.
 - `EP05-AT-04` (Read-Only Rate Card Route): `GET /api/rate-cards` returns 401 without operator authentication, and authenticated calls perform zero database writes.
 - `EP05-AT-05` (Video Review & Selection): Reviewing a video asset as `APPROVED` updates its status to active selection; producers can inspect attempt history and toggle active selection among approved assets.
+
+## Verification Evidence
+
+- `pnpm -r typecheck`: PASS (0 errors across contracts, servers, clients).
+- `pnpm test`: PASS (18/18 contracts unit tests, 58/58 servers unit tests = 76/76 PASS).
+- `pnpm test:guardrails`: PASS (4/4 PASS).
+- `pnpm check:evidence`: PASS (30/30 docs PASS).
+- **PostgreSQL 16 Integration Tests** (`docker compose exec web pnpm --filter @nolen/server test:integration`): **88/88 PASS** across all 9 test suites:
+  - `src/assets/assets.integration.test.ts` (17 tests PASS)
+  - `src/financial/financial.integration.test.ts` (21 tests PASS)
+  - `src/dispatch/completion.integration.test.ts` (11 tests PASS)
+  - `src/worker/worker.integration.test.ts` (11 tests PASS)
+  - `src/dispatch/dispatch.integration.test.ts` (7 tests PASS)
+  - `src/db/migrate.integration.test.ts` (3 tests PASS)
+  - `src/stories/story.integration.test.ts` (10 tests PASS)
+  - `src/films/film.integration.test.ts` (7 tests PASS)
+  - `src/routes/health.integration.test.ts` (1 test PASS)
+- **Playwright E2E Tests** (`pnpm test:e2e tests/e2e/shot-review.spec.ts`): **4/4 PASS**:
+  - `EP-05: Keyframe gating blocks video generation before keyframe approval`: PASS
+  - `EP-05: Exact provider selection dispatches matching rate card without silent fallback`: PASS
+  - `EP-05: Lost attempt response preserves retry identity across retries`: PASS
+  - `EP-05: Video review modal opens and displays review controls`: PASS
 
 ## Open Questions / Blocked Contracts
 
