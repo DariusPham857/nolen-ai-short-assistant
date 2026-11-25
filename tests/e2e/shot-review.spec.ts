@@ -80,10 +80,15 @@ test('EP-05: Keyframe gating blocks video generation before keyframe approval', 
 test('EP-05: Exact provider selection dispatches matching rate card without silent fallback', async ({ page }) => {
   await openStoryboard(page);
 
-  // Read available rate cards to find Gemini card ID
+  // Read available rate cards and verify all 4 baseline providers are provisioned
   const rcRes = await page.request.get('/api/rate-cards');
+  expect(rcRes.status()).toBe(200);
   const rateCards = (await rcRes.json()) as { id: string; provider: string; operation: string }[];
   const geminiCard = rateCards.find(rc => rc.provider === 'GEMINI' && rc.operation === 'IMAGE');
+  expect(geminiCard).toBeDefined();
+  expect(rateCards.find(rc => rc.provider === 'RUNWAY' && rc.operation === 'VIDEO')).toBeDefined();
+  expect(rateCards.find(rc => rc.provider === 'FAL_KLING' && rc.operation === 'VIDEO')).toBeDefined();
+  expect(rateCards.find(rc => rc.provider === 'LOCAL_PAN_ZOOM' && rc.operation === 'VIDEO')).toBeDefined();
 
   let interceptedBody: Record<string, unknown> | null = null;
   await page.route('**/api/films/*/attempts', async route => {
@@ -106,9 +111,7 @@ test('EP-05: Exact provider selection dispatches matching rate card without sile
 
   expect(interceptedBody).not.toBeNull();
   expect(interceptedBody?.kind).toBe('IMAGE');
-  if (geminiCard) {
-    expect(interceptedBody?.rateCardSnapshotId).toBe(geminiCard.id);
-  }
+  expect(interceptedBody?.rateCardSnapshotId).toBe(geminiCard!.id);
 });
 
 test('EP-05: Lost attempt response preserves retry identity across retries', async ({ page }) => {

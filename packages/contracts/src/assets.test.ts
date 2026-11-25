@@ -105,21 +105,44 @@ describe('Asset Contracts', () => {
     })).toThrow();
   });
 
-  it('validates shotAttemptDtoSchema', () => {
-    const valid = {
+  it('validates shotAttemptDtoSchema across all DB attempt states including SUBMITTED and SUBMISSION_UNCERTAIN', () => {
+    const validStates = [
+      'QUEUED',
+      'SUBMITTED',
+      'SUBMISSION_UNCERTAIN',
+      'RUNNING',
+      'SUCCEEDED',
+      'FAILED',
+      'CANCELED',
+    ] as const;
+
+    for (const state of validStates) {
+      const valid = {
+        id: crypto.randomUUID(),
+        filmId: crypto.randomUUID(),
+        storyRevisionId: crypto.randomUUID(),
+        shotRevisionId: crypto.randomUUID(),
+        kind: 'VIDEO',
+        state,
+        executionMode: 'REPLAY',
+        provider: 'RUNWAY',
+        assetId: crypto.randomUUID(),
+        latestReviewDecision: 'APPROVED',
+        isSelected: true,
+        createdAt: new Date().toISOString(),
+      };
+      expect(shotAttemptDtoSchema.parse(valid)).toMatchObject(valid);
+    }
+
+    expect(() => shotAttemptDtoSchema.parse({
       id: crypto.randomUUID(),
       filmId: crypto.randomUUID(),
-      storyRevisionId: crypto.randomUUID(),
-      shotRevisionId: crypto.randomUUID(),
+      storyRevisionId: null,
+      shotRevisionId: null,
       kind: 'VIDEO',
-      state: 'SUCCEEDED',
+      state: 'UNKNOWN_STATE',
       executionMode: 'REPLAY',
-      provider: 'RUNWAY',
-      assetId: crypto.randomUUID(),
-      latestReviewDecision: 'APPROVED',
-      isSelected: true,
       createdAt: new Date().toISOString(),
-    };
-    expect(shotAttemptDtoSchema.parse(valid)).toMatchObject(valid);
+    })).toThrow();
   });
 });

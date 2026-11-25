@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { shotAttemptDtoSchema } from '@nolen/contracts';
 import { digest, unlock } from '../auth/sessions.js';
 import { runtimeConfig } from '../config/runtime.js';
 import { pgClient } from '../db/index.js';
@@ -994,19 +996,37 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       expectedReviewCount: 0,
     });
 
-    // 2. Query attempts endpoint
+    // 2. Also admit attempts and transition them to SUBMITTED and SUBMISSION_UNCERTAIN
+    const subRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(subRes.status).toBe(201);
+    const { attemptId: submittedId } = await subRes.json() as { attemptId: string };
+    await pgClient`UPDATE attempts SET state = 'SUBMITTED' WHERE id = ${submittedId}`;
+
+    const uncRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(uncRes.status).toBe(201);
+    const { attemptId: uncertainId } = await uncRes.json() as { attemptId: string };
+    await pgClient`UPDATE attempts SET state = 'SUBMISSION_UNCERTAIN' WHERE id = ${uncertainId}`;
+
+    // 3. Query attempts endpoint and parse entire response with shared shotAttemptDtoSchema
     const attemptsRes = await request(`/api/films/${f.filmId}/shots/${f.shotId}/attempts`, 'GET');
     expect(attemptsRes.status).toBe(200);
-    const attempts = await attemptsRes.json() as {
-      id: string;
-      kind: string;
-      executionMode: string;
-      assetId: string;
-      latestReviewDecision: string;
-      isSelected: boolean;
-    }[];
+    const attempts = z.array(shotAttemptDtoSchema).parse(await attemptsRes.json());
 
-    expect(attempts.length).toBeGreaterThanOrEqual(1);
+    expect(attempts.length).toBeGreaterThanOrEqual(3);
     const found = attempts.find(a => a.id === att1Id);
     expect(found).toBeDefined();
     expect(found?.kind).toBe('IMAGE');
@@ -1014,5 +1034,8 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     expect(found?.assetId).toBe(asset1.id);
     expect(found?.latestReviewDecision).toBe('APPROVED');
     expect(found?.isSelected).toBe(true);
+
+    expect(attempts.find(a => a.id === submittedId)?.state).toBe('SUBMITTED');
+    expect(attempts.find(a => a.id === uncertainId)?.state).toBe('SUBMISSION_UNCERTAIN');
   });
 });

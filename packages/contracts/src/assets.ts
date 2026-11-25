@@ -55,7 +55,7 @@ export const shotAttemptDtoSchema = z.object({
   storyRevisionId: z.string().uuid().nullable(),
   shotRevisionId: z.string().uuid().nullable(),
   kind: z.enum(['IMAGE', 'VIDEO', 'TTS', 'ASSEMBLY']),
-  state: z.enum(['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED']),
+  state: z.enum(['QUEUED', 'SUBMITTED', 'SUBMISSION_UNCERTAIN', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED']),
   executionMode: z.enum(['LIVE', 'REPLAY']),
   provider: z.string().optional(),
   assetId: z.string().uuid().nullable().optional(),

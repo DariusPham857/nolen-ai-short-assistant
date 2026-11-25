@@ -10,6 +10,7 @@ import { claimProviderSubmission, relayOne } from './outbox.js';
 import { auditFinancialProjection } from './repository.js';
 import { canonicalizePayload } from '../dispatch/service.js';
 import { fakeAssetProducer } from '../assets/repository.js';
+import { seedBaselineRateCards } from '../db/seed-rate-cards.js';
 
 const token='financial-test-operator-token-at-least-32-bytes';
 const api=createFinancialApi();let cookie='';
@@ -681,6 +682,20 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       SELECT payload FROM dispatch_outbox WHERE attempt_id = ${videoAttemptId}
     `;
     expect(outboxRowAfter.payload.request.keyframeAssetId).toBe(assetA.id);
+  });
+
+  it('EP-05: bootstrap rate cards seed provisions all 4 REPLAY providers idempotently for GET /api/rate-cards', async () => {
+    await seedBaselineRateCards(pgClient);
+    // Calling a second time must remain idempotent
+    await seedBaselineRateCards(pgClient);
+
+    const res = await request('/api/rate-cards', 'GET');
+    expect(res.status).toBe(200);
+    const cards = await res.json() as { provider: string; operation: string; sourceRef: string }[];
+    expect(cards.some(c => c.provider === 'GEMINI' && c.operation === 'IMAGE')).toBe(true);
+    expect(cards.some(c => c.provider === 'RUNWAY' && c.operation === 'VIDEO')).toBe(true);
+    expect(cards.some(c => c.provider === 'FAL_KLING' && c.operation === 'VIDEO')).toBe(true);
+    expect(cards.some(c => c.provider === 'LOCAL_PAN_ZOOM' && c.operation === 'VIDEO')).toBe(true);
   });
 });
 

@@ -46,9 +46,9 @@ Source: [PRD v1.0 §19, §25, §29, §30.3](../../docs/PRD/PRD_AI_Short_Film_Ass
 - `pnpm test`: PASS (18/18 contracts unit tests, 58/58 servers unit tests = 76/76 PASS).
 - `pnpm test:guardrails`: PASS (4/4 PASS).
 - `pnpm check:evidence`: PASS (30/30 docs PASS).
-- **PostgreSQL 16 Integration Tests** (`docker compose exec web pnpm --filter @nolen/server test:integration`): **89/89 PASS** across all 9 test suites:
+- **PostgreSQL 16 Integration Tests** (`docker compose exec web pnpm --filter @nolen/server test:integration`): **90/90 PASS** across all 9 test suites:
   - `src/assets/assets.integration.test.ts` (17 tests PASS)
-  - `src/financial/financial.integration.test.ts` (22 tests PASS)
+  - `src/financial/financial.integration.test.ts` (23 tests PASS)
   - `src/dispatch/completion.integration.test.ts` (11 tests PASS)
   - `src/worker/worker.integration.test.ts` (11 tests PASS)
   - `src/dispatch/dispatch.integration.test.ts` (7 tests PASS)
