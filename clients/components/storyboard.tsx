@@ -193,6 +193,17 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
       activePending = pendingAttempt;
     }
 
+    // Fail closed: if an unresolved pending attempt exists on another shot or kind,
+    // prevent fresh generation to avoid overwriting stored retry identity and causing duplicate charges.
+    if (!activePending && pendingAttempt) {
+      setGeneratingKind(null);
+      setGeneratingProgress(null);
+      setGenerationError(
+        `Cannot start generation: an unresolved attempt is pending on shot "${pendingAttempt.shotId}" (${pendingAttempt.kind}). Resolve or discard it before creating new attempts.`
+      );
+      return;
+    }
+
     let record: PendingAttempt;
     if (activePending) {
       // RETRY: Send every field verbatim from the stored pending attempt
@@ -425,7 +436,14 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               <Button
                 variant="outline"
                 type="button"
-                disabled={disabled || !shot.id || !shotRev || !activeImageRateCard || Boolean(generatingKind)}
+                disabled={
+                  disabled ||
+                  !shot.id ||
+                  !shotRev ||
+                  !activeImageRateCard ||
+                  Boolean(generatingKind) ||
+                  Boolean(pendingAttempt && (pendingAttempt.shotId !== shot.id || pendingAttempt.kind !== 'IMAGE'))
+                }
                 onClick={() => void handleGenerate('IMAGE')}
                 className="flex-1 text-xs h-8 border-zinc-700 hover:border-zinc-500"
               >
@@ -504,7 +522,8 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
                   !isStoryApproved ||
                   isVideoBlockedByKeyframe ||
                   !activeVideoRateCard ||
-                  Boolean(generatingKind)
+                  Boolean(generatingKind) ||
+                  Boolean(pendingAttempt && (pendingAttempt.shotId !== shot.id || pendingAttempt.kind !== 'VIDEO'))
                 }
                 onClick={() => void handleGenerate('VIDEO')}
                 className="flex-1 text-xs h-8 border-zinc-700 hover:border-zinc-500 disabled:opacity-50"
@@ -568,6 +587,23 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
                   Discard
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Cross-Shot Pending Attempt Notice */}
+          {pendingAttempt && pendingAttempt.shotId !== shot.id && (
+            <div className="p-2.5 rounded bg-amber-950/40 border border-amber-800 text-xs space-y-1" data-testid="cross-shot-pending-banner">
+              <div className="flex justify-between items-start">
+                <span className="font-semibold text-amber-300">
+                  Unresolved Attempt on Another Shot
+                </span>
+                <span className="text-[10px] font-mono text-amber-400/80 bg-amber-900/60 px-1 py-0.5 rounded border border-amber-700/60">
+                  LOCKED
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-300">
+                An attempt on another shot ({pendingAttempt.kind} · {pendingAttempt.provider}) is pending resolution. Please resolve or discard it before dispatching new attempts.
+              </p>
             </div>
           )}
 

@@ -9,11 +9,11 @@ Source: [approved specification](spec.md)
 |---|---|---|---|
 | EP05-01 | Freeze specification, link contracts, and record dependencies | `pnpm check:evidence`, `spec.md` valid | DONE |
 | EP05-02 | Add `@nolen/contracts` schemas: `selectShotAssetSchema` and `shotAttemptDtoSchema` | `pnpm --filter @nolen/contracts test` (18/18 PASS) | DONE |
-| EP05-03 | Backend repository methods: `selectShotAsset`, `getShotAttempts`, read-only `listRateCards` | PG16 integration tests in `assets.integration.test.ts` & `financial.integration.test.ts` (38/38 PASS) | DONE |
+| EP05-03 | Backend repository methods: `selectShotAsset`, `getShotAttempts`, read-only `listRateCards` | PG16 integration tests in `assets.integration.test.ts` & `financial.integration.test.ts` (39/39 PASS) | DONE |
 | EP05-04 | Authenticated API routes: `/selections`, `/attempts`, and read-only `/api/rate-cards` | 401 unauthenticated check, read-only assertion (EP05-AT-04) | DONE |
-| EP05-05 | Storyboard workstation UI: exact provider selection, keyframe gating, preserved retry identity | E2E Playwright test `tests/e2e/shot-review.spec.ts` (4/4 PASS) | DONE |
-| EP05-06 | `VideoReviewModal`: 9:16 viewport, attempt history, approve/reject/set active controls | E2E Playwright test `tests/e2e/shot-review.spec.ts` (4/4 PASS) | DONE |
-| EP05-07 | Full quality gates, evidence verification, and PR handoff | `pnpm test` (76/76 PASS), `typecheck` (0 errors), `test:guardrails` (4/4 PASS), `check:evidence` (30/30 PASS), PG16 integration (88/88 PASS) | DONE |
+| EP05-05 | Storyboard workstation UI: exact provider selection, keyframe gating, preserved retry identity | E2E Playwright test `tests/e2e/shot-review.spec.ts` (5/5 PASS) | DONE |
+| EP05-06 | `VideoReviewModal`: 9:16 viewport, attempt history, approve/reject/set active controls | E2E Playwright test `tests/e2e/shot-review.spec.ts` (5/5 PASS) | DONE |
+| EP05-07 | Full quality gates, evidence verification, and PR handoff | `pnpm test` (76/76 PASS), `typecheck` (0 errors), `test:guardrails` (4/4 PASS), `check:evidence` (30/30 PASS), PG16 integration (89/89 PASS) | DONE |
 
 ## Handoff
 

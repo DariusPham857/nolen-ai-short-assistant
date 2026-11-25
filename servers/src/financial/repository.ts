@@ -162,6 +162,7 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       );
     }
 
+    let approvedKeyframeAssetId: string | undefined = undefined;
     if (input.kind === 'VIDEO') {
       // In P0 / DEC-P03 / PRD v1.0 §1290, all offered video paths (Runway I2V, fal Kling I2V, Local Pan/Zoom)
       // are image-driven and require an approved keyframe, regardless of shot classification.
@@ -192,6 +193,8 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       if (!approvedKeyframe) {
         throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
       }
+
+      approvedKeyframeAssetId = approvedKeyframe.asset_id;
 
       const category: AssetCategory = approvedKeyframe.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
       const filename = path.basename(approvedKeyframe.storage_path);
@@ -265,6 +268,7 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       executionMode,
       prompt: prompt.trim(),
       aspectRatio: '9:16',
+      keyframeAssetId: approvedKeyframeAssetId,
       fixturePackVersion: input.fixturePackVersion ?? defaultFixture?.packVersion,
       fixtureId: input.fixtureId ?? defaultFixture?.fixtureId,
     });

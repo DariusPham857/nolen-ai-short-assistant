@@ -183,3 +183,61 @@ test('EP-05: Video review modal opens and displays review controls', async ({ pa
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await expect(modal).not.toBeVisible();
 });
+
+test('EP-05: Pending attempt on Shot 1 locks fresh generation on Shot 2 and preserves record A', async ({ page }) => {
+  const filmId = await openStoryboard(page);
+
+  // 1. Intercept attempts endpoint and abort to simulate lost connection on Shot 1
+  let shot1Key = '';
+  let postCount = 0;
+  await page.route('**/api/films/*/attempts', async route => {
+    postCount++;
+    shot1Key = route.request().headers()['idempotency-key'] ?? '';
+    await route.abort('failed');
+  });
+
+  // 2. Trigger Keyframe generation on Shot 1 -> network failure
+  const generateKeyframeBtn = page.getByRole('button', { name: 'Generate Keyframe', exact: true });
+  await generateKeyframeBtn.click();
+  expect(postCount).toBe(1);
+
+  // Verify recovery banner on Shot 1 with shot1Key
+  const bannerShot1 = page.getByTestId('pending-attempt-banner');
+  await expect(bannerShot1).toBeVisible();
+  await expect(bannerShot1).toContainText(shot1Key);
+
+  // Read stored record from sessionStorage
+  const attemptSlot = `nolen-attempt-${filmId}`;
+  const recordBefore = await page.evaluate(slot => sessionStorage.getItem(slot), attemptSlot);
+  expect(recordBefore).not.toBeNull();
+  const parsedBefore = JSON.parse(recordBefore!);
+  expect(parsedBefore.key).toBe(shot1Key);
+
+  // 3. Switch to Shot 2 in the scenes/shots list
+  const shot2Btn = page.getByRole('button', { name: /Shot 2/i });
+  await shot2Btn.click();
+
+  // 4. Assert cross-shot pending banner is visible on Shot 2
+  const crossBanner = page.getByTestId('cross-shot-pending-banner');
+  await expect(crossBanner).toBeVisible();
+
+  // 5. Assert generation buttons on Shot 2 are disabled
+  await expect(page.getByRole('button', { name: 'Generate Keyframe', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Generate Video', exact: true })).toBeDisabled();
+
+  // POST count must NOT increase
+  expect(postCount).toBe(1);
+
+  // 6. Verify sessionStorage record A is completely unchanged and not overwritten
+  const recordAfter = await page.evaluate(slot => sessionStorage.getItem(slot), attemptSlot);
+  expect(recordAfter).toBe(recordBefore);
+  const parsedAfter = JSON.parse(recordAfter!);
+  expect(parsedAfter.key).toBe(shot1Key);
+  expect(parsedAfter.shotId).toBe(parsedBefore.shotId);
+
+  // 7. Return to Shot 1 and verify original retry banner is intact
+  const shot1Btn = page.getByRole('button', { name: /Shot 1/i });
+  await shot1Btn.click();
+  await expect(page.getByTestId('pending-attempt-banner')).toBeVisible();
+  await expect(page.getByTestId('pending-attempt-banner')).toContainText(shot1Key);
+});

@@ -9,6 +9,7 @@ import { createFinancialApi } from '../http/financial-api.js';
 import { claimProviderSubmission, relayOne } from './outbox.js';
 import { auditFinancialProjection } from './repository.js';
 import { canonicalizePayload } from '../dispatch/service.js';
+import { fakeAssetProducer } from '../assets/repository.js';
 
 const token='financial-test-operator-token-at-least-32-bytes';
 const api=createFinancialApi();let cookie='';
@@ -598,6 +599,88 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     expect(res.status).toBe(422);
     const body = await res.json() as { error?: { code: string } };
     expect(body.error?.code).toBe('UNVERIFIED_LIVE_RATE_CARD');
+  });
+
+  it('EP-05: VIDEO admission freezes approved keyframeAssetId into outbox snapshot and survives subsequent selection changes', async () => {
+    const f = await fixture('100', '25');
+    const shotId = randomUUID();
+    const shotRevisionId = randomUUID();
+    const sceneId = randomUUID();
+    const videoRateCardId = randomUUID();
+    const imageRateCardId = randomUUID();
+
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${videoRateCardId}, 'RUNWAY', 'gen4_turbo', 'VIDEO', 'PER_SECOND', 50000, '2026-01-01', '2027-01-01', 'test runway rate')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${imageRateCardId}, 'GEMINI', 'gemini-3.1-flash-image', 'IMAGE', 'FIXED_PER_REQUEST', 20000, '2026-01-01', '2027-01-01', 'test gemini rate')`;
+      await tx`INSERT INTO scenes(id, film_id) VALUES(${sceneId}, ${f.filmId})`;
+      await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"A cinematic wide shot"}'::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
+    });
+
+    // 1. Produce Keyframe A on disk and approve it
+    const attemptAId = randomUUID();
+    await pgClient`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+      VALUES(${attemptAId}, ${f.filmId}, ${f.storyRevisionId}, ${shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${imageRateCardId}, 1, 0, 'SUCCEEDED', 'REPLAY')`;
+    const assetA = await fakeAssetProducer({
+      filmId: f.filmId,
+      attemptId: attemptAId,
+      shotRevisionId,
+      kind: 'IMAGE',
+    });
+    await pgClient`INSERT INTO shot_asset_selections(film_id, story_revision_id, shot_id, shot_revision_id, kind, asset_id, selected_by)
+      VALUES(${f.filmId}, ${f.storyRevisionId}, ${shotId}, ${shotRevisionId}, 'IMAGE', ${assetA.id}, 'operator')`;
+    await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
+      VALUES(${randomUUID()}, ${f.filmId}, ${assetA.id}, ${shotRevisionId}, 'APPROVED', 'operator', 'Approved keyframe A')`;
+
+    // 2. Admit VIDEO attempt
+    const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 5,
+      executionMode: 'REPLAY',
+    }, randomUUID());
+    expect(res.status).toBe(201);
+    const { attemptId: videoAttemptId } = await res.json() as { attemptId: string };
+
+    // 3. Inspect dispatch_outbox payload: keyframeAssetId MUST equal assetA.id
+    const [outboxRow] = await pgClient<{ payload: { request: { keyframeAssetId?: string } } }[]>`
+      SELECT payload FROM dispatch_outbox WHERE attempt_id = ${videoAttemptId}
+    `;
+    expect(outboxRow.payload.request.keyframeAssetId).toBe(assetA.id);
+
+    // 4. Produce Keyframe B on disk and switch active selection
+    const attemptBId = randomUUID();
+    await pgClient`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+      VALUES(${attemptBId}, ${f.filmId}, ${f.storyRevisionId}, ${shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${imageRateCardId}, 1, 0, 'SUCCEEDED', 'REPLAY')`;
+    const assetB = await fakeAssetProducer({
+      filmId: f.filmId,
+      attemptId: attemptBId,
+      shotRevisionId,
+      kind: 'IMAGE',
+    });
+    await pgClient`
+      UPDATE shot_asset_selections
+      SET asset_id = ${assetB.id}
+      WHERE film_id = ${f.filmId}
+        AND story_revision_id = ${f.storyRevisionId}
+        AND shot_id = ${shotId}
+        AND kind = 'IMAGE'
+    `;
+
+    // 5. Re-inspect dispatch_outbox payload: keyframeAssetId MUST STILL BE assetA.id (frozen snapshot)
+    const [outboxRowAfter] = await pgClient<{ payload: { request: { keyframeAssetId?: string } } }[]>`
+      SELECT payload FROM dispatch_outbox WHERE attempt_id = ${videoAttemptId}
+    `;
+    expect(outboxRowAfter.payload.request.keyframeAssetId).toBe(assetA.id);
   });
 });
 

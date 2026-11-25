@@ -46,21 +46,22 @@ Source: [PRD v1.0 §19, §25, §29, §30.3](../../docs/PRD/PRD_AI_Short_Film_Ass
 - `pnpm test`: PASS (18/18 contracts unit tests, 58/58 servers unit tests = 76/76 PASS).
 - `pnpm test:guardrails`: PASS (4/4 PASS).
 - `pnpm check:evidence`: PASS (30/30 docs PASS).
-- **PostgreSQL 16 Integration Tests** (`docker compose exec web pnpm --filter @nolen/server test:integration`): **88/88 PASS** across all 9 test suites:
+- **PostgreSQL 16 Integration Tests** (`docker compose exec web pnpm --filter @nolen/server test:integration`): **89/89 PASS** across all 9 test suites:
   - `src/assets/assets.integration.test.ts` (17 tests PASS)
-  - `src/financial/financial.integration.test.ts` (21 tests PASS)
+  - `src/financial/financial.integration.test.ts` (22 tests PASS)
   - `src/dispatch/completion.integration.test.ts` (11 tests PASS)
   - `src/worker/worker.integration.test.ts` (11 tests PASS)
   - `src/dispatch/dispatch.integration.test.ts` (7 tests PASS)
-  - `src/db/migrate.integration.test.ts` (3 tests PASS)
+  - `src/db/migrate.integration.test.ts` (10 tests PASS)
   - `src/stories/story.integration.test.ts` (10 tests PASS)
   - `src/films/film.integration.test.ts` (7 tests PASS)
   - `src/routes/health.integration.test.ts` (1 test PASS)
-- **Playwright E2E Tests** (`pnpm test:e2e tests/e2e/shot-review.spec.ts`): **4/4 PASS**:
+- **Playwright E2E Tests** (`pnpm test:e2e tests/e2e/shot-review.spec.ts`): **5/5 PASS**:
   - `EP-05: Keyframe gating blocks video generation before keyframe approval`: PASS
   - `EP-05: Exact provider selection dispatches matching rate card without silent fallback`: PASS
   - `EP-05: Lost attempt response preserves retry identity across retries`: PASS
   - `EP-05: Video review modal opens and displays review controls`: PASS
+  - `EP-05: Pending attempt on Shot 1 locks fresh generation on Shot 2 and preserves record A`: PASS
 
 ## Open Questions / Blocked Contracts
 
