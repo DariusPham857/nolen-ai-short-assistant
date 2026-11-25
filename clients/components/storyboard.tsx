@@ -425,6 +425,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
                 )}
               </div>
             </div>
+            <p className="text-xs text-zinc-400">Keyframe: {shotRev?.policy.effectiveRequirement ?? 'Classified on save'}</p>
 
             {!activeImageRateCard && (
               <p className="text-[11px] text-rose-400/90 bg-rose-950/30 border border-rose-900/50 rounded p-1.5">

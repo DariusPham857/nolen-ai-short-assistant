@@ -44,6 +44,7 @@ jobs:
       - name: QG-INTEGRATION PostgreSQL 16 migrations, sessions, concurrency
         run: pnpm test:integration
       - run: pnpm db:migrate
+      - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - name: QG-EVIDENCE production browser flows
         run: pnpm test:e2e
