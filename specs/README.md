@@ -12,5 +12,6 @@ Source: [ENG-DEC-001](../docs/development/ENG-DEC-001.md).
 - [Shot Video Generation & Review Workstation](shot-review/spec.md) and [implementation tasks](shot-review/tasks.md)
 - [Generation Input Contract, Preview & Reference Library](generation-inputs/spec.md) and [implementation tasks](generation-inputs/tasks.md)
 - [Shared Compose Storage Prerequisite](compose-storage/spec.md) and [implementation tasks](compose-storage/tasks.md)
+- [Local FFmpeg Pan/Zoom Static Video](local-pan-zoom/spec.md) and [implementation tasks](local-pan-zoom/tasks.md)
 
 Commands and gate limitations: [verification](../docs/development/verification.md).
