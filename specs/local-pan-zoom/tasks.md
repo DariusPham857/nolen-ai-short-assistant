@@ -9,7 +9,7 @@ Source: [spec](spec.md)
 |---|---|---|---|---|---|
 | LP-00 | R0/R1 | REQUIRED (Gate) | Run FFmpeg `libx264` + `zoompan` + `ffprobe` spike in `nolen-fc001:local`, draft spec & tasks for approval | `pnpm check:evidence` PASS; container spike PASS (`ffmpeg 5.1.9-0+deb12u1`) | DONE (awaiting approval) |
 | LP-01 | R1 | REQUIRED | Contracts (`LOCAL_PIPELINE` provenance, `LOCAL_STORAGE` locator, `startFrameProvenance` lineage) & `LOCAL_VERIFIED` `$0.00` rate card | `@nolen/contracts` RED → GREEN unit tests; `seed-rate-cards.ts` | PENDING |
-| LP-02 | R0 | REQUIRED | `ffmpeg-pan-zoom.ts` renderer, `ffprobe` verification, `completeLocalPanZoomAttempt()`, terminal/conflict checks, `$0` settlement | Container `test:media` + PG16 `local-pan-zoom.integration.test.ts` (`LP-AT-01`–`LP-AT-06`) | PENDING |
+| LP-02 | R0 | REQUIRED | `ffmpeg-pan-zoom.ts` renderer, `ffprobe` verification, pre-render terminal check, `completeLocalPanZoomAttempt()`, handled failure cleanup/settlement vs crash recovery | Container `test:media` + PG16 `local-pan-zoom.integration.test.ts` (`LP-AT-01`–`LP-AT-03`, `LP-AT-05`, `LP-AT-06`, `LP-AT-08`) | PENDING |
 | LP-03 | R0/R1 | REQUIRED | `admitAttempt()` remote-LIVE block + `LOCAL_PAN_ZOOM` unlock, `worker/index.ts` `live:generation:dispatch`, `storyboard.tsx` LIVE rate-card filter & lineage badge | PG16 `worker.integration.test.ts` + Compose Playwright E2E (`LP-AT-04`, `LP-AT-07`) + full CI matrix | PENDING |
 
 ### LP-00 Docker Image Spike Evidence (2026-11-25)
