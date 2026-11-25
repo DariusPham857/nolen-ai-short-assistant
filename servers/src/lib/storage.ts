@@ -13,8 +13,8 @@
  * @see PRD §8 Architecture, §20.5 DEC-P06
  */
 import { existsSync, mkdirSync } from "fs";
-import { readFile, writeFile, unlink } from "fs/promises";
-import { createHash } from "crypto";
+import { open, readFile, writeFile, unlink } from "fs/promises";
+import { createHash, randomUUID } from "crypto";
 import path from "path";
 import { getEnv } from "../config/env.js";
 
@@ -94,6 +94,19 @@ export class StorageAdapter {
     const data = await this.read(category, filename);
     const actualHash = createHash("sha256").update(data).digest("hex");
     return actualHash === expectedHash;
+  }
+
+  /** Verify the configured storage root is writable via an atomic temp file probe. */
+  async checkWritable(): Promise<void> {
+    const probePath = this.resolve("temp", `.probe-${randomUUID()}`);
+    const handle = await open(probePath, "wx", 0o600);
+    try {
+      await handle.writeFile("ok");
+      await handle.sync();
+    } finally {
+      await handle.close();
+      await unlink(probePath).catch(() => undefined);
+    }
   }
 
   /** Check if a file exists in storage. */

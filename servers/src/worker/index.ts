@@ -12,8 +12,10 @@
  * @see PRD §8 Architecture Baseline, §20 DEC-P06
  */
 import "dotenv/config";
+import path from "node:path";
 import PgBoss from "pg-boss";
 import { getEnv } from "../config/env.js";
+import { storage } from "../lib/storage.js";
 import {
   shutdownHandler,
   WorkerLoopRunner,
@@ -92,6 +94,9 @@ function isEventEmitterLike(target: unknown): target is EventEmitterLike {
 export async function startWorker(options: WorkerOptions = {}): Promise<RunningWorker> {
   console.log("[worker] Initializing pg-boss worker...");
   console.log(`[worker] Execution mode: ${env.EXECUTION_MODE}`);
+
+  await storage.checkWritable();
+  console.log(`[worker] Storage verified writable at ${path.resolve(env.STORAGE_BASE_PATH)}`);
 
   const boss =
     options.boss ??
