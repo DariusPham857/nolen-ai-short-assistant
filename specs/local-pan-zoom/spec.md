@@ -46,7 +46,9 @@ Source: [PRD v1.0 §12, §17, §20](../../docs/PRD/PRD_AI_Short_Film_Assistant_v
   4. **Atomic Completion (Happy Path + Race Guard):** Inside transaction (`attempts FOR UPDATE` → `attempt_financial_state FOR UPDATE`): re-verify `attempts.state` against concurrent terminal transitions (`FAILED`/`CANCELED` → preserve terminal state & ACK outbox without writing `Asset`); if `SUCCEEDED`, verify existing `Asset` hash/path/lineage; else insert `Asset` (`ON CONFLICT (attempt_id) DO NOTHING`), verify inserted/conflicting row, append `RESERVATION_RELEASED` (`0` micros, `FINAL`, `evidence: { reason: 'LOCAL_PIPELINE_ZERO_API_FEE' }`), settle `attempt_financial_state` to `FINAL/0/0/0`, and CAS-update `attempts` (`SUCCEEDED`), `outbound_dispatches` (`SUCCEEDED`), `dispatch_outbox` (`WORKER_CONFIRMED`).
   5. **Handled Local Failure Path vs Unhandled Crash:**
      - **Handled failure** (`START_FRAME` missing/hash mismatch, FFmpeg non-zero exit or timeout+`SIGKILL`, `ffprobe` invalid/incompatible output): clean up any temp render file immediately; insert zero `Asset` rows; inside transaction (`attempts FOR UPDATE` → `attempt_financial_state FOR UPDATE`), if already terminal (`FAILED`/`CANCELED`/`SUCCEEDED`) due to race, preserve existing state and ACK outbox; else CAS-transition `attempts` (`QUEUED | RUNNING → FAILED`), `outbound_dispatches` (`→ FAILED`), append `RESERVATION_RELEASED` (`0` micros, `FINAL`, `evidence: { reason: 'LOCAL_PIPELINE_FAILED', code }`), settle `attempt_financial_state` (`PENDING → FINAL`, `0/0/0`), and confirm `dispatch_outbox` (`DELIVERED`, `WORKER_CONFIRMED`) so deterministic failures do not poison-loop `pg-boss`.
-     - **Unhandled process crash** (`AFTER_DISK_WRITE` / `AFTER_DB_COMMIT_BEFORE_ACK`): `dispatch_outbox` stays unconfirmed and non-terminal `attempts` recover cleanly on `pg-boss` redelivery (`LP-AT-02`).
+     - **Unhandled process crash** (`LP-AT-02`):
+       - **Before DB commit** (`AFTER_DISK_WRITE`): DB rolls back (`dispatch_outbox` unconfirmed, `attempts` non-terminal); `pg-boss` redelivery executes full recovery idempotently.
+       - **After DB commit before `pg-boss` job ACK** (`AFTER_DB_COMMIT_BEFORE_ACK`): DB transaction has already committed (`dispatch_outbox = WORKER_CONFIRMED`, `attempts = SUCCEEDED`, `Asset` & `$0` settlement persisted); `pg-boss` redelivery verifies the saved result/Asset without creating any duplicate `Asset` or ledger event.
 
 ## Invariants
 
@@ -59,7 +61,9 @@ Source: [PRD v1.0 §12, §17, §20](../../docs/PRD/PRD_AI_Short_Film_Assistant_v
 ## Acceptance criteria
 
 - `LP-AT-01`: `LIVE` `LOCAL_PAN_ZOOM` attempt from an approved `REPLAY` `START_FRAME` renders a real `1080x1920`, `h264`, `yuv420p`, `0`-audio-stream MP4 matching `ShotRevision.spec.durationSeconds`, registered with `LOCAL_PIPELINE` + `startFrameProvenance: 'REPLAY_FIXTURE'` and `$0` settled financial state (`FINAL / 0 / 0 / 0`).
-- `LP-AT-02`: Simulated unhandled crash `AFTER_DISK_WRITE` before DB commit leaves outbox unconfirmed and recovers cleanly on duplicate `pg-boss` delivery without duplicating `Asset` rows or corrupting financial state.
+- `LP-AT-02`: Simulated unhandled crash recovers cleanly on duplicate `pg-boss` delivery without duplicating `Asset` rows or ledger events:
+  - `AFTER_DISK_WRITE` (before DB commit): rolls back, redelivery completes recovery.
+  - `AFTER_DB_COMMIT_BEFORE_ACK` (after DB commit, before `pg-boss` ACK): redelivery verifies saved `Asset`/lineage idempotently without duplicate writes.
 - `LP-AT-03`: Corrupted or missing `START_FRAME` file on disk is a handled failure before invoking `ffmpeg`: zero `Asset` rows, `attempts = FAILED`, `$0` settled (`FINAL/0/0/0`), outbox `WORKER_CONFIRMED`.
 - `LP-AT-04`: `LIVE` admission of `GEMINI`, `RUNWAY`, or `FAL_KLING` rejects with `422 LIVE_PROVIDER_UNAVAILABLE` until `PD-05b-CORE`.
 - `LP-AT-05`: Duplicate delivery arriving after attempt is already `FAILED` or `CANCELED` (including when `START_FRAME` is missing/deleted on disk) preserves terminal state, never reads media or spawns `ffmpeg`, and ACKs outbox (`alreadyTerminal: true`).
