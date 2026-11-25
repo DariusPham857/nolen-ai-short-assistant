@@ -14,5 +14,5 @@ it("connects to real PostgreSQL 16 and reports ready", async () => {
   const response = await app.request("http://127.0.0.1:3000/api/health/ready");
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
-  expect(body).toEqual({ status: "ready", timestamp: timestampMatcher, checks: { database: "connected" } });
+  expect(body).toEqual({ status: "ready", timestamp: timestampMatcher, checks: { database: "connected", storage: "writable" } });
 });

@@ -303,4 +303,39 @@ it("BLOCK 1 (Startup Queue Provisioning): fails closed and does not start relay 
   expect(mockBoss.work).not.toHaveBeenCalled();
 });
 
+it("CS-AT-01: aborts worker startup before pg-boss starts when storage is unwritable", async () => {
+  const { storage } = await import("../lib/storage.js");
+  const { startWorker } = await import("./index.js");
+  const { WorkerLoopRunner } = await import("./shutdown.js");
+
+  const checkSpy = vi.spyOn(storage, "checkWritable").mockRejectedValueOnce(new Error("EACCES: read-only storage"));
+  const mockBoss = {
+    start: vi.fn().mockResolvedValue(undefined),
+    createQueue: vi.fn().mockResolvedValue(undefined),
+    work: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+  };
+  const relayRunner = new WorkerLoopRunner({ intervalMs: 100, passFn: vi.fn() });
+  const sweepRunner = new WorkerLoopRunner({ intervalMs: 100, passFn: vi.fn() });
+  const relayStartSpy = vi.spyOn(relayRunner, "start");
+  const sweepStartSpy = vi.spyOn(sweepRunner, "start");
+
+  try {
+    await expect(
+      startWorker({
+        boss: mockBoss,
+        relayRunner,
+        sweepRunner,
+        registerSignals: false,
+      }),
+    ).rejects.toThrow("EACCES: read-only storage");
+    expect(mockBoss.start).not.toHaveBeenCalled();
+    expect(mockBoss.createQueue).not.toHaveBeenCalled();
+    expect(relayStartSpy).not.toHaveBeenCalled();
+    expect(sweepStartSpy).not.toHaveBeenCalled();
+  } finally {
+    checkSpy.mockRestore();
+  }
+});
+
 

@@ -1,9 +1,10 @@
-# FC-001: canonical localhost topology. Source: specs/film-creation/spec.md
+# FC-001: canonical localhost topology. Source: specs/film-creation/spec.md; CS-001: specs/compose-storage/spec.md
 x-app: &app
   image: nolen-fc001:local
   environment: &env
     DATABASE_URL: postgresql://nolen:nolen_dev@db:5432/nolen_film
     EXECUTION_MODE: REPLAY
+    STORAGE_BASE_PATH: /app/storage
 
 services:
   db:
@@ -34,6 +35,8 @@ services:
       OPERATOR_TOKEN: ${OPERATOR_TOKEN:?Set OPERATOR_TOKEN to a random secret of at least 32 bytes}
     ports:
       - '127.0.0.1:3000:3000'
+    volumes:
+      - media_storage:/app/storage
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -45,8 +48,11 @@ services:
   worker:
     <<: *app
     command: [pnpm, --filter, '@nolen/server', 'worker:start']
+    volumes:
+      - media_storage:/app/storage
     depends_on:
       migration:
         condition: service_completed_successfully
 volumes:
   pgdata:
+  media_storage:
