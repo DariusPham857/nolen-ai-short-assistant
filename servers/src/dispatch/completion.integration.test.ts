@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { canonicalStoryV2 } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { admitAttempt, resolveOutboxQueue } from '../financial/repository.js';
+import { computeRequestFingerprint } from '../dispatch/service.js';
+import { previewAndAdmitMediaAttempt } from '../test-helpers/media-admission.js';
 import { completeReplayAttempt, handleUnsupportedKindAttempt } from './completion.js';
 import { storage } from '../lib/storage.js';
 import { resolveFixture } from '../fixtures/resolver.js';
@@ -51,9 +54,11 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
       await tx`INSERT INTO budget_limit_events(id, film_id, actor_id, prior_limit_usd_micros, new_limit_usd_micros, reason)
         VALUES(${randomUUID()}, ${filmId}, 'local-operator', ${budget}, ${budget}, 'test baseline')`;
 
-      // 2. Story Revision (Approved)
+      // 2. Story Revision (Approved) with valid StoryContent v2 + ShotSpec v2
+      const storyContent = canonicalStoryV2();
+      const shotSpec = storyContent.scenes[0].shots[0].spec;
       await tx`INSERT INTO story_revisions(id, film_id, revision_no, state, content, content_hash)
-        VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', '{"title":"Test Story"}'::jsonb, 'fixture-content-hash')`;
+        VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', ${JSON.stringify({ content: storyContent })}::jsonb, 'fixture-content-hash')`;
       await tx`UPDATE films SET active_story_revision_id=${storyRevisionId}, status='PLANNING' WHERE id=${filmId}`;
 
       await tx`INSERT INTO story_validations(id, story_revision_id, context, dependency_hash, rule_set_version, findings)
@@ -79,7 +84,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
 
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${filmId})`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRevisionId}, ${filmId}, ${shotId}, '{"prompt":"Detective in trench coat under neon lights"}'::jsonb, 'dep-hash-1', ${JSON.stringify({ effectiveRequirement: keyframePolicy })}::jsonb)`;
+        VALUES(${shotRevisionId}, ${filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-1', ${JSON.stringify({ effectiveRequirement: keyframePolicy })}::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${filmId}, ${storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
 
@@ -124,8 +129,8 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
       pending_liability_usd_micros: string;
     }[]>`SELECT * FROM film_budget_accounts WHERE film_id = ${s.filmId}`;
 
-    // 2. Admit REPLAY IMAGE attempt
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    // 2. Admit REPLAY IMAGE attempt via preview + admit
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -234,13 +239,13 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
     await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
       VALUES(${randomUUID()}, ${s.filmId}, ${keyframeAsset.id}, ${s.shotRevisionId}, 'APPROVED', 'local-operator', 'Approved keyframe fixture')`;
 
-    // Admit REPLAY VIDEO attempt
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    // Admit REPLAY VIDEO attempt (PER_SECOND pricingUnits must equal ShotRevision durationSeconds = 5)
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'VIDEO',
       rateCardSnapshotId: s.runwayRateId,
-      pricingUnits: 1,
+      pricingUnits: 5,
       executionMode: 'REPLAY',
     });
 
@@ -322,7 +327,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
     expect(outboxReplayAssembly.queue_name).toBe('replay:assembly:dispatch');
 
     // LIVE IMAGE
-    const liveImage = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: liveImage } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -356,7 +361,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   it('BLOCK 2: handles misrouted TTS kind cleanly without deadlocking within bounded timeout', async () => {
     const s = await seedTestSetup();
 
-    // Admit REPLAY TTS attempt
+    // Admit REPLAY TTS attempt (direct v1 admission, no preview required)
     const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: null,
@@ -458,7 +463,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
     const s = await seedTestSetup();
 
     // Seed attempt
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -501,7 +506,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   it('recovers outbound_dispatches and outbox on retry when attempt is already SUCCEEDED', async () => {
     const s = await seedTestSetup();
 
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -542,7 +547,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   it('handles 2 concurrent completions idempotently, registering exactly 1 asset with identical ID', async () => {
     const s = await seedTestSetup();
 
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -576,7 +581,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   it('recovers cleanly from simulated crash AFTER_DISK_WRITE', async () => {
     const s = await seedTestSetup();
 
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -609,7 +614,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   it('recovers cleanly from simulated crash AFTER_DB_COMMIT_BEFORE_ACK', async () => {
     const s = await seedTestSetup();
 
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -640,7 +645,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
   it('rejects attempt if financial state has open reservation or contaminated ledger events', async () => {
     const s = await seedTestSetup();
 
-    const admitted = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: admitted } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -657,5 +662,40 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
     `;
 
     await expect(completeReplayAttempt(admitted.attemptId)).rejects.toThrow('REPLAY_FINANCIAL_STATE_INVALID');
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 11. GI-AT-10: Legacy v1 persisted media outbox compatibility
+  // ───────────────────────────────────────────────────────────────────────────
+  it('GI-AT-10: verifies legacy v1 media outbox payload fingerprint and completes Replay without schemaVersion injection', async () => {
+    const s = await seedTestSetup();
+    const attemptId = randomUUID();
+    const legacyV1Request = {
+      attemptId,
+      filmId: s.filmId,
+      shotRevisionId: s.shotRevisionId,
+      kind: 'IMAGE',
+      provider: 'GEMINI',
+      executionMode: 'REPLAY',
+      prompt: 'Legacy v1 persisted prompt',
+      aspectRatio: '9:16',
+      fixturePackVersion: 'v1',
+      fixtureId: 'default-gemini-image-9-16',
+    };
+    const fingerprint = computeRequestFingerprint(legacyV1Request);
+    const frozenV1 = { ...legacyV1Request, requestFingerprint: fingerprint };
+
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+        VALUES(${attemptId}, ${s.filmId}, ${s.storyRevisionId}, ${s.shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${s.geminiRateId}, 1, 0, 'QUEUED', 'REPLAY')`;
+      await tx`INSERT INTO attempt_financial_state(attempt_id, reservation_open_usd_micros, billing_status)
+        VALUES(${attemptId}, '0', 'FINAL')`;
+      await tx`INSERT INTO dispatch_outbox(id, attempt_id, queue_name, payload)
+        VALUES(${randomUUID()}, ${attemptId}, 'replay:generation:dispatch', ${JSON.stringify({ request: frozenV1, requestFingerprint: fingerprint })}::jsonb)`;
+    });
+
+    const completed = await completeReplayAttempt(attemptId);
+    expect(completed.state).toBe('SUCCEEDED');
+    expect(completed.assetId).toBeTruthy();
   });
 });

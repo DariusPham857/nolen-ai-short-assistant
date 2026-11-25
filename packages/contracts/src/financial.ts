@@ -42,7 +42,24 @@ export const createAttemptSchema = estimateAttemptSchema.extend({
   executionMode: executionModeSchema.optional().default('REPLAY'),
   fixtureId: fixtureIdSchema.optional(),
   fixturePackVersion: fixturePackVersionSchema.optional(),
+  expectedPreviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict().superRefine((data, ctx) => {
+  if (data.kind === 'IMAGE' || data.kind === 'VIDEO') {
+    if (!data.shotRevisionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Image and video attempts require shotRevisionId',
+        path: ['shotRevisionId'],
+      });
+    }
+    if (!data.expectedPreviewHash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Image and video attempts require expectedPreviewHash from server preview',
+        path: ['expectedPreviewHash'],
+      });
+    }
+  }
   if (data.executionMode === 'LIVE') {
     if (data.fixtureId !== undefined) {
       ctx.addIssue({

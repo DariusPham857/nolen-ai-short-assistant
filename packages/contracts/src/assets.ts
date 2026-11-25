@@ -2,6 +2,25 @@ import { z } from 'zod';
 
 export const assetKindSchema = z.enum(['IMAGE', 'VIDEO']);
 export const assetReviewDecisionSchema = z.enum(['APPROVED', 'REJECTED']);
+export const referenceMimeTypeSchema = z.enum(['image/png', 'image/jpeg', 'image/webp']);
+
+export const referenceAssetDtoSchema = z.object({
+  id: z.string().uuid(),
+  filmId: z.string().uuid(),
+  mediaUrl: z.string().min(1),
+  sha256Hash: z.string().regex(/^[a-f0-9]{64}$/),
+  mimeType: referenceMimeTypeSchema,
+  byteSize: z.string().regex(/^[1-9]\d*$/),
+  width: z.number().int().min(300).max(4096),
+  height: z.number().int().min(300).max(4096),
+  label: z.string().trim().min(1).max(120),
+  sourceNote: z.string().trim().min(1).max(500),
+  licenseUrl: z.string().url().max(1000).nullable(),
+  rightsConfirmedBy: z.string().min(1).max(64),
+  rightsConfirmedAt: z.string().datetime(),
+  createdAt: z.string().datetime(),
+});
+export type ReferenceAssetDto = z.infer<typeof referenceAssetDtoSchema>;
 
 export const assetDtoSchema = z.object({
   id: z.string().uuid(),

@@ -10,10 +10,25 @@ it('keeps financial money as bounded decimal strings', () => {
   expect(moneyProjectionSchema.safeParse({budgetLimitUsdMicros:'1',actualSpentUsdMicros:'2',reservedOpenUsdMicros:'0',pendingLiabilityUsdMicros:'0',availableUsdMicros:'-1',headroomUsdMicros:'-1',version:0,warningThresholdBps:8000,warning:true}).success).toBe(false);
 });
 
-it('rejects untrusted derived attempt fields', () => {
-  const input={storyRevisionId:crypto.randomUUID(),shotRevisionId:null,kind:'VIDEO',rateCardSnapshotId:crypto.randomUUID(),pricingUnits:5};
-  expect(createAttemptSchema.safeParse({...input,reservationUsdMicros:'1'}).success).toBe(false);
-  expect(createAttemptSchema.parse(input).shotRevisionId).toBeNull();
+it('rejects untrusted derived attempt fields and enforces preview hash only for media kinds', () => {
+  const ttsInput={storyRevisionId:crypto.randomUUID(),shotRevisionId:null,kind:'TTS' as const,rateCardSnapshotId:crypto.randomUUID(),pricingUnits:5};
+  expect(createAttemptSchema.safeParse({...ttsInput,reservationUsdMicros:'1'}).success).toBe(false);
+  expect(createAttemptSchema.parse(ttsInput).shotRevisionId).toBeNull();
+  expect(createAttemptSchema.safeParse({
+    storyRevisionId:crypto.randomUUID(),
+    shotRevisionId:crypto.randomUUID(),
+    kind:'IMAGE',
+    rateCardSnapshotId:crypto.randomUUID(),
+    pricingUnits:1,
+  }).success).toBe(false);
+  expect(createAttemptSchema.safeParse({
+    storyRevisionId:crypto.randomUUID(),
+    shotRevisionId:null,
+    kind:'VIDEO',
+    rateCardSnapshotId:crypto.randomUUID(),
+    pricingUnits:5,
+    expectedPreviewHash:'a'.repeat(64),
+  }).success).toBe(false);
   expect(attemptReceiptSchema.safeParse({attemptId:crypto.randomUUID(),filmId:crypto.randomUUID(),state:'QUEUED',billingStatus:'PENDING',reservationUsdMicros:'1',outboxStatus:'PENDING'}).success).toBe(true);
   expect(attemptReceiptSchema.safeParse({attemptId:crypto.randomUUID(),filmId:crypto.randomUUID(),state:'QUEUED',billingStatus:'FINAL',reservationUsdMicros:'0',outboxStatus:'PENDING'}).success).toBe(true);
   expect(attemptReceiptSchema.safeParse({attemptId:crypto.randomUUID(),filmId:crypto.randomUUID(),state:'QUEUED',billingStatus:'DISPUTED',reservationUsdMicros:'0',outboxStatus:'PENDING'}).success).toBe(false);
@@ -27,6 +42,7 @@ it('enforces execution mode and conditional fixture fields on createAttemptSchem
     kind: 'IMAGE' as const,
     rateCardSnapshotId: crypto.randomUUID(),
     pricingUnits: 1,
+    expectedPreviewHash: 'b'.repeat(64),
   };
 
   // Defaults to REPLAY mode

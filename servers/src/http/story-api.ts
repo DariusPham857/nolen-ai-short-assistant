@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { canonicalStory, expectedSchema, saveStorySchema, validateStorySchema, waiverSchema } from '@nolen/contracts';
+import { canonicalStoryV2, expectedSchema, saveStorySchema, validateStorySchema, waiverSchema } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { command, readStoryboard } from '../stories/repository.js';
 import { ApiFailure } from './errors.js';
@@ -19,7 +19,7 @@ export function createStoryApi(){
         expectedSchema.parse(body);
         const [film]=await pgClient`SELECT id FROM films WHERE id=${filmId} AND operator_id=${operator}`;
         if(!film)throw new ApiFailure(404,'FILM_NOT_FOUND','Film not found');
-        return c.json({provenance:{source:'FIXTURE',fixtureId:'the-last-light-45s-v1',liveInference:false},content:canonicalStory()});
+        return c.json({provenance:{source:'FIXTURE',fixtureId:'the-last-light-45s-v2',liveInference:false},content:canonicalStoryV2()});
       }
       if(kind==='validate'){
         const input=validateStorySchema.parse(body);

@@ -35,6 +35,144 @@ export async function boundedJson(request: Request, limit: number): Promise<unkn
   catch { throw new ApiFailure(400, 'INVALID_JSON', 'Malformed JSON'); }
 }
 
+const MAX_MULTIPART_FILE_BYTES = 10 * 1024 * 1024; // 10 MiB
+const MAX_MULTIPART_BODY_BYTES = MAX_MULTIPART_FILE_BYTES + 64 * 1024; // 10 MiB + 64 KiB
+
+export interface ParsedReferenceUpload {
+  fileBuffer: Buffer;
+  label: string;
+  sourceNote: string;
+  licenseUrl: string | null;
+  rightsConfirmed: true;
+}
+
+/**
+ * Stream-bound multipart upload reader: enforces byte cap before delegating
+ * boundary/CRLF/quoting parsing to Web API FormData. Never trusts client MIME/filename.
+ */
+export async function boundedMultipart(
+  request: Request,
+  maxBodyBytes = MAX_MULTIPART_BODY_BYTES,
+  maxFileBytes = MAX_MULTIPART_FILE_BYTES,
+): Promise<ParsedReferenceUpload> {
+  const rawContentType = request.headers.get('content-type') ?? '';
+  if (rawContentType.split(';')[0].trim().toLowerCase() !== 'multipart/form-data') {
+    throw new ApiFailure(415, 'UNSUPPORTED_MEDIA_TYPE', 'Use multipart/form-data');
+  }
+  const declaredLen = request.headers.get('content-length');
+  if (declaredLen !== null) {
+    const len = Number(declaredLen);
+    if (Number.isFinite(len) && len > maxBodyBytes) {
+      throw new ApiFailure(413, 'PAYLOAD_TOO_LARGE', 'Multipart upload exceeds 10 MiB limit');
+    }
+  }
+
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  if (reader) {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      totalBytes += next.value.byteLength;
+      if (totalBytes > maxBodyBytes) {
+        await reader.cancel();
+        throw new ApiFailure(413, 'PAYLOAD_TOO_LARGE', 'Multipart upload exceeds 10 MiB limit');
+      }
+      chunks.push(next.value);
+    }
+  }
+
+  let form: FormData;
+  try {
+    const boundedBuffer = Buffer.concat(chunks);
+    const internalReq = new Request('http://127.0.0.1:3000/internal-multipart', {
+      method: 'POST',
+      headers: { 'content-type': rawContentType },
+      body: boundedBuffer,
+    });
+    form = await internalReq.formData();
+  } catch {
+    throw new ApiFailure(400, 'INVALID_MULTIPART', 'Malformed multipart/form-data payload');
+  }
+
+  const fileEntries = form.getAll('file');
+  if (fileEntries.length !== 1 || !(fileEntries[0] instanceof File)) {
+    throw new ApiFailure(422, 'VALIDATION_ERROR', 'Exactly one reference image file is required');
+  }
+  // Reject unexpected extra file fields
+  for (const [fieldName, value] of form.entries()) {
+    if (fieldName !== 'file' && value instanceof File) {
+      throw new ApiFailure(422, 'VALIDATION_ERROR', 'Only a single file field is permitted');
+    }
+  }
+  const uploadedFile = fileEntries[0];
+  if (uploadedFile.size === 0) {
+    throw new ApiFailure(422, 'VALIDATION_ERROR', 'Reference image file cannot be empty');
+  }
+  if (uploadedFile.size > maxFileBytes) {
+    throw new ApiFailure(413, 'PAYLOAD_TOO_LARGE', 'Reference image file exceeds 10 MiB limit');
+  }
+
+  const readBoundedText = (field: string, maxLen: number): string => {
+    const values = form.getAll(field);
+    if (values.length > 1) {
+      throw new ApiFailure(422, 'VALIDATION_ERROR', `Duplicate field: ${field}`);
+    }
+    const raw = values[0];
+    if (typeof raw !== 'string') return '';
+    if (raw.length > maxLen * 2) {
+      throw new ApiFailure(422, 'VALIDATION_ERROR', `${field} exceeds maximum length`);
+    }
+    return raw.trim();
+  };
+
+  const label = readBoundedText('label', 120);
+  const sourceNote = readBoundedText('sourceNote', 500);
+  const licenseRaw = readBoundedText('licenseUrl', 1000);
+  const rightsRaw = readBoundedText('rightsConfirmed', 16);
+
+  if (rightsRaw !== 'true') {
+    throw new ApiFailure(422, 'RIGHTS_CONFIRMATION_REQUIRED', 'Producer must confirm commercial/reference usage rights');
+  }
+  if (!label || label.length > 120) {
+    throw new ApiFailure(422, 'VALIDATION_ERROR', 'Label must be 1–120 characters');
+  }
+  if (!sourceNote || sourceNote.length > 500) {
+    throw new ApiFailure(422, 'VALIDATION_ERROR', 'Source note must be 1–500 characters');
+  }
+
+  let licenseUrl: string | null = null;
+  if (licenseRaw.length > 0) {
+    if (licenseRaw.length > 1000) {
+      throw new ApiFailure(422, 'VALIDATION_ERROR', 'License URL exceeds 1000 characters');
+    }
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(licenseRaw);
+    } catch {
+      throw new ApiFailure(422, 'VALIDATION_ERROR', 'Invalid licenseUrl');
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      throw new ApiFailure(422, 'VALIDATION_ERROR', 'License URL must use http or https');
+    }
+    licenseUrl = parsedUrl.toString();
+  }
+
+  const fileBuffer = Buffer.from(await uploadedFile.arrayBuffer());
+  if (fileBuffer.byteLength === 0 || fileBuffer.byteLength > maxFileBytes) {
+    throw new ApiFailure(413, 'PAYLOAD_TOO_LARGE', 'Reference image file exceeds 10 MiB limit');
+  }
+
+  return {
+    fileBuffer,
+    label,
+    sourceNote,
+    licenseUrl,
+    rightsConfirmed: true,
+  };
+}
+
 
 /** Common transport and error boundary, including standalone route-group tests. */
 export function installBoundary(api:Hono):void {

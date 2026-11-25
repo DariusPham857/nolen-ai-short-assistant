@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import PgBoss from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { apiErrorSchema, attemptFinancialDtoSchema, attemptReceiptSchema, moneyProjectionSchema, type GenerationRequest } from '@nolen/contracts';
+import { apiErrorSchema, attemptFinancialDtoSchema, attemptReceiptSchema, canonicalStoryV2, moneyProjectionSchema, type GenerationRequest } from '@nolen/contracts';
 import { unlock } from '../auth/sessions.js';
 import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
@@ -23,7 +23,7 @@ async function fixture(budget='100',rate='25',rateType:'FIXED_PER_REQUEST'|'PER_
     await tx`INSERT INTO films(id,title,brief,budget_limit_usd_micros,operator_id,idempotency_key,request_hash) VALUES(${filmId},'FI test','Financial fixture',${budget},'local-operator',${randomUUID()},'fixture')`;
     await tx`INSERT INTO film_budget_accounts(film_id,operator_id,budget_limit_usd_micros) VALUES(${filmId},'local-operator',${budget})`;
     await tx`INSERT INTO budget_limit_events(id,film_id,actor_id,prior_limit_usd_micros,new_limit_usd_micros,reason) VALUES(${randomUUID()},${filmId},'local-operator',${budget},${budget},'test baseline')`;
-    await tx`INSERT INTO story_revisions(id,film_id,revision_no,state,content,content_hash) VALUES(${storyRevisionId},${filmId},1,${approved?'APPROVED':'IN_REVIEW'},'{}'::jsonb,'fixture')`;
+    await tx`INSERT INTO story_revisions(id,film_id,revision_no,state,content,content_hash) VALUES(${storyRevisionId},${filmId},1,${approved?'APPROVED':'IN_REVIEW'},${JSON.stringify({content:canonicalStoryV2()})}::jsonb,'fixture')`;
     await tx`UPDATE films SET active_story_revision_id=${storyRevisionId},status='PLANNING' WHERE id=${filmId}`;
     if(approved){
       await tx`INSERT INTO story_validations(id,story_revision_id,context,dependency_hash,rule_set_version,findings) VALUES(${validationRunId},${storyRevisionId},'STORY_APPROVAL','fixture-dependency',${ruleSetVersion},'[]'::jsonb)`;
@@ -308,8 +308,9 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
+      const shotSpec = canonicalStoryV2().scenes[0].shots[0].spec;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"Hero walking"}'::jsonb, 'dep-hash-1', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-1', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
@@ -323,6 +324,7 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       rateCardSnapshotId: videoRateCardId,
       pricingUnits: 1,
       executionMode: 'REPLAY',
+      expectedPreviewHash: '0'.repeat(64),
     });
     expect(res.status).toBe(409);
     const body = await res.json() as { error?: { code: string } };
@@ -551,6 +553,8 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
 
   it('EP-05: server-side keyframe gating blocks OPTIONAL shot video attempt when no keyframe approved', async () => {
     const f = await fixture('100', '25');
+    const storyContent = canonicalStoryV2();
+    const shotSpec = storyContent.scenes[0].shots[0].spec;
     const shotId = randomUUID();
     const shotRevisionId = randomUUID();
     const sceneId = randomUUID();
@@ -564,7 +568,7 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"A cinematic wide shot"}'::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
     });
@@ -576,6 +580,7 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       rateCardSnapshotId: videoRateCardId,
       pricingUnits: 5,
       executionMode: 'REPLAY',
+      expectedPreviewHash: '0'.repeat(64),
     });
     expect(res.status).toBe(409);
     const body = await res.json() as { error?: { code: string } };
@@ -602,8 +607,10 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     expect(body.error?.code).toBe('UNVERIFIED_LIVE_RATE_CARD');
   });
 
-  it('EP-05: VIDEO admission freezes approved keyframeAssetId into outbox snapshot and survives subsequent selection changes', async () => {
+  it('EP-05 / GI-03: VIDEO admission binds approved START_FRAME into outbox v2 snapshot and survives subsequent selection changes', async () => {
     const f = await fixture('100', '25');
+    const storyContent = canonicalStoryV2();
+    const shotSpec = storyContent.scenes[0].shots[0].spec;
     const shotId = randomUUID();
     const shotRevisionId = randomUUID();
     const sceneId = randomUUID();
@@ -620,7 +627,7 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, '{"prompt":"A cinematic wide shot"}'::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-opt', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
     });
@@ -640,7 +647,33 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
       VALUES(${randomUUID()}, ${f.filmId}, ${assetA.id}, ${shotRevisionId}, 'APPROVED', 'operator', 'Approved keyframe A')`;
 
-    // 2. Admit VIDEO attempt
+    // 2. Preview VIDEO attempt -> mismatched PER_SECOND units must fail with 422 PRICING_UNITS_DURATION_MISMATCH
+    const badUnitsPreview = await request(`/api/films/${f.filmId}/generation-previews`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    });
+    expect(badUnitsPreview.status).toBe(422);
+    expect(((await badUnitsPreview.json()) as { error?: { code: string } }).error?.code).toBe('PRICING_UNITS_DURATION_MISMATCH');
+
+    // Valid preview with pricingUnits === 5
+    const previewRes = await request(`/api/films/${f.filmId}/generation-previews`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 5,
+      executionMode: 'REPLAY',
+    });
+    expect(previewRes.status).toBe(200);
+    const previewData = await previewRes.json() as { previewHash: string; template: { prompt: string; inputAssets: Array<{ role: string; assetId: string }> } };
+    expect(previewData.template.inputAssets[0]).toMatchObject({ role: 'START_FRAME', assetId: assetA.id });
+
+    // Admit VIDEO attempt using exact previewHash
+    const admitKey = randomUUID();
     const res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId,
@@ -648,17 +681,19 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       rateCardSnapshotId: videoRateCardId,
       pricingUnits: 5,
       executionMode: 'REPLAY',
-    }, randomUUID());
+      expectedPreviewHash: previewData.previewHash,
+    }, admitKey);
     expect(res.status).toBe(201);
     const { attemptId: videoAttemptId } = await res.json() as { attemptId: string };
 
-    // 3. Inspect dispatch_outbox payload: keyframeAssetId MUST equal assetA.id
-    const [outboxRow] = await pgClient<{ payload: { request: { keyframeAssetId?: string } } }[]>`
+    // 3. Inspect dispatch_outbox payload: schemaVersion '2' and START_FRAME assetId MUST equal assetA.id
+    const [outboxRow] = await pgClient<{ payload: { request: { schemaVersion: string; inputAssets: Array<{ role: string; assetId: string }> } } }[]>`
       SELECT payload FROM dispatch_outbox WHERE attempt_id = ${videoAttemptId}
     `;
-    expect(outboxRow.payload.request.keyframeAssetId).toBe(assetA.id);
+    expect(outboxRow.payload.request.schemaVersion).toBe('2');
+    expect(outboxRow.payload.request.inputAssets.find(a => a.role === 'START_FRAME')?.assetId).toBe(assetA.id);
 
-    // 4. Produce Keyframe B on disk and switch active selection
+    // 4. Produce Keyframe B on disk, approve it, and switch active selection
     const attemptBId = randomUUID();
     await pgClient`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
       VALUES(${attemptBId}, ${f.filmId}, ${f.storyRevisionId}, ${shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${imageRateCardId}, 1, 0, 'SUCCEEDED', 'REPLAY')`;
@@ -668,6 +703,8 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
       shotRevisionId,
       kind: 'IMAGE',
     });
+    await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
+      VALUES(${randomUUID()}, ${f.filmId}, ${assetB.id}, ${shotRevisionId}, 'APPROVED', 'operator', 'Approved keyframe B')`;
     await pgClient`
       UPDATE shot_asset_selections
       SET asset_id = ${assetB.id}
@@ -677,11 +714,40 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
         AND kind = 'IMAGE'
     `;
 
-    // 5. Re-inspect dispatch_outbox payload: keyframeAssetId MUST STILL BE assetA.id (frozen snapshot)
-    const [outboxRowAfter] = await pgClient<{ payload: { request: { keyframeAssetId?: string } } }[]>`
+    // 5. Re-inspect dispatch_outbox payload: START_FRAME MUST STILL BE assetA.id (frozen snapshot)
+    const [outboxRowAfter] = await pgClient<{ payload: { request: { inputAssets: Array<{ role: string; assetId: string }> } } }[]>`
       SELECT payload FROM dispatch_outbox WHERE attempt_id = ${videoAttemptId}
     `;
-    expect(outboxRowAfter.payload.request.keyframeAssetId).toBe(assetA.id);
+    expect(outboxRowAfter.payload.request.inputAssets.find(a => a.role === 'START_FRAME')?.assetId).toBe(assetA.id);
+
+    // 6. Retrying the ALREADY-COMMITTED request with the same Idempotency-Key replays original receipt even though selection changed!
+    const replaySameKey = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 5,
+      executionMode: 'REPLAY',
+      expectedPreviewHash: previewData.previewHash,
+    }, admitKey);
+    expect(replaySameKey.status).toBe(201);
+    expect(((await replaySameKey.json()) as { attemptId: string }).attemptId).toBe(videoAttemptId);
+
+    // 7. New Idempotency-Key with old previewData.previewHash MUST fail with 409 GENERATION_PREVIEW_STALE and zero new DB rows
+    const attemptsBeforeStale = await pgClient`SELECT id FROM attempts WHERE film_id = ${f.filmId}`;
+    const staleRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: videoRateCardId,
+      pricingUnits: 5,
+      executionMode: 'REPLAY',
+      expectedPreviewHash: previewData.previewHash,
+    }, randomUUID());
+    expect(staleRes.status).toBe(409);
+    expect(((await staleRes.json()) as { error?: { code: string } }).error?.code).toBe('GENERATION_PREVIEW_STALE');
+    const attemptsAfterStale = await pgClient`SELECT id FROM attempts WHERE film_id = ${f.filmId}`;
+    expect(attemptsAfterStale).toHaveLength(attemptsBeforeStale.length);
   });
 
   it('EP-05: bootstrap rate cards seed provisions all 4 REPLAY providers idempotently for GET /api/rate-cards', async () => {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { attemptKindSchema, executionModeSchema, fixturePackVersionSchema, fixtureIdSchema } from './financial.js';
+import { cameraAngleSchema } from './story.js';
 
 export { executionModeSchema, fixturePackVersionSchema, fixtureIdSchema };
 
@@ -40,7 +41,8 @@ export const assetLocatorSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
-export const generationRequestSchema = z.object({
+/** Legacy v1 GenerationRequest retained for historical outbox compatibility and TTS/ASSEMBLY. */
+export const generationRequestV1Schema = z.object({
   attemptId: z.string().uuid(),
   filmId: z.string().uuid(),
   shotRevisionId: z.string().uuid().nullable().optional(),
@@ -56,6 +58,134 @@ export const generationRequestSchema = z.object({
   fixturePackVersion: fixturePackVersionSchema.optional(),
   fixtureId: fixtureIdSchema.optional(),
   requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict();
+
+export const inputAssetSourceSchema = z.enum(['REFERENCE_UPLOAD', 'GENERATED_ASSET']);
+export const inputAssetRoleSchema = z.enum([
+  'START_FRAME',
+  'CHARACTER_REFERENCE',
+  'WARDROBE_REFERENCE',
+  'PROP_REFERENCE',
+  'LOCATION_REFERENCE',
+  'STYLE_REFERENCE',
+]);
+
+export const inputAssetSchema = z.object({
+  source: inputAssetSourceSchema,
+  role: inputAssetRoleSchema,
+  assetId: z.string().uuid(),
+  sha256Hash: z.string().regex(/^[a-f0-9]{64}$/),
+  mimeType: z.string().min(1).max(64),
+}).strict();
+
+export const structuredIntentSchema = z.object({
+  shotType: z.enum(['CHARACTER', 'ACTION', 'DIALOGUE', 'ESTABLISHING', 'BROLL', 'INSERT', 'PRODUCT', 'OTHER']),
+  authoredPrompt: z.string().min(1).max(2000),
+  camera: z.object({
+    angle: z.union([cameraAngleSchema, z.literal('UNSPECIFIED')]),
+    framing: z.string().min(1).max(2000),
+    movement: z.string().min(1).max(2000),
+  }).strict(),
+  location: z.object({ id: z.string(), name: z.string(), description: z.string() }).strict(),
+  styleRef: z.object({ id: z.string(), name: z.string(), description: z.string() }).strict(),
+  subjects: z.array(z.object({ id: z.string(), name: z.string(), description: z.string() }).strict()),
+  wardrobes: z.array(z.object({ id: z.string(), name: z.string(), description: z.string() }).strict()),
+  props: z.array(z.object({ id: z.string(), name: z.string(), description: z.string(), hero: z.boolean() }).strict()),
+  continuity: z.object({
+    startLighting: z.string(),
+    endLighting: z.string(),
+    startCharacters: z.array(z.object({ characterId: z.string(), wardrobeId: z.string(), pose: z.string(), heldPropIds: z.array(z.string()) }).strict()),
+    endCharacters: z.array(z.object({ characterId: z.string(), wardrobeId: z.string(), pose: z.string(), heldPropIds: z.array(z.string()) }).strict()),
+  }).strict(),
+  intendedTransitions: z.array(z.object({ field: z.string(), reason: z.string() }).strict()),
+}).strict();
+
+const generationTemplateV2Base = z.object({
+  filmId: z.string().uuid(),
+  storyRevisionId: z.string().uuid(),
+  shotRevisionId: z.string().uuid(),
+  kind: z.enum(['IMAGE', 'VIDEO']),
+  provider: providerKindSchema,
+  modelId: z.string().trim().min(1).max(200),
+  rateCardSnapshotId: z.string().uuid(),
+  executionMode: executionModeSchema,
+  prompt: z.string().trim().min(1).max(5000),
+  negativePrompt: z.string().max(1000),
+  promptCompilerVersion: z.literal('generation-intent-1'),
+  shotDependencyHash: z.string().min(1).max(128),
+  camera: z.object({
+    angle: z.union([cameraAngleSchema, z.literal('UNSPECIFIED')]),
+    framing: z.string().min(1).max(2000),
+    movement: z.string().min(1).max(2000),
+  }).strict(),
+  aspectRatio: z.literal('9:16'),
+  durationSeconds: z.number().int().min(1).max(60).optional(),
+  inputAssets: z.array(inputAssetSchema).max(64),
+  structuredIntent: structuredIntentSchema,
+  fixturePackVersion: fixturePackVersionSchema.optional(),
+  fixtureId: fixtureIdSchema.optional(),
+}).strict();
+
+function validateV2Invariants(
+  data: z.infer<typeof generationTemplateV2Base>,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.kind === 'IMAGE') {
+    if (data.durationSeconds !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['durationSeconds'], message: 'IMAGE requests must not specify durationSeconds' });
+    }
+    if (data.prompt.length > 5000) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['prompt'], message: 'IMAGE prompt exceeds 5000 characters' });
+    }
+  } else if (data.kind === 'VIDEO') {
+    if (data.durationSeconds === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['durationSeconds'], message: 'VIDEO requests require durationSeconds' });
+    }
+    if (data.prompt.length > 1000) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['prompt'], message: 'VIDEO prompt exceeds 1000 characters' });
+    }
+  }
+  if (data.executionMode === 'REPLAY') {
+    if (!data.fixturePackVersion || !data.fixtureId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['fixtureId'], message: 'REPLAY requests require fixturePackVersion and fixtureId' });
+    }
+  } else if (data.executionMode === 'LIVE') {
+    if (data.fixturePackVersion !== undefined || data.fixtureId !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['fixtureId'], message: 'LIVE requests strictly forbid fixture identity' });
+    }
+  }
+}
+
+export const generationRequestTemplateV2Schema = generationTemplateV2Base.superRefine(validateV2Invariants);
+
+export const generationRequestV2Schema = generationTemplateV2Base.extend({
+  schemaVersion: z.literal('2'),
+  attemptId: z.string().uuid(),
+  requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine(validateV2Invariants);
+
+export const generationRequestSchema = z.union([generationRequestV2Schema, generationRequestV1Schema]);
+
+export const generationPreviewRequestSchema = z.object({
+  storyRevisionId: z.string().uuid(),
+  shotRevisionId: z.string().uuid(),
+  kind: z.enum(['IMAGE', 'VIDEO']),
+  rateCardSnapshotId: z.string().uuid(),
+  pricingUnits: z.number().int().min(1).max(86400),
+  executionMode: executionModeSchema.optional().default('REPLAY'),
+  fixturePackVersion: fixturePackVersionSchema.optional(),
+  fixtureId: fixtureIdSchema.optional(),
+}).strict().superRefine((data, ctx) => {
+  if (data.executionMode === 'LIVE' && (data.fixtureId !== undefined || data.fixturePackVersion !== undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['fixtureId'], message: 'LIVE mode strictly forbids fixture identity' });
+  }
+});
+
+export const generationPreviewResponseSchema = z.object({
+  previewHash: z.string().regex(/^[a-f0-9]{64}$/),
+  compilerVersion: z.literal('generation-intent-1'),
+  template: generationRequestTemplateV2Schema,
+  generatedAt: z.string().datetime(),
 }).strict();
 
 export const submissionResultSchema = z.object({
@@ -120,7 +250,15 @@ export type ProviderKind = z.infer<typeof providerKindSchema>;
 export type ExecutionMode = z.infer<typeof executionModeSchema>;
 export type Provenance = z.infer<typeof provenanceSchema>;
 export type DispatchState = z.infer<typeof dispatchStateSchema>;
+export type InputAssetSource = z.infer<typeof inputAssetSourceSchema>;
+export type InputAssetRole = z.infer<typeof inputAssetRoleSchema>;
+export type InputAsset = z.infer<typeof inputAssetSchema>;
+export type GenerationRequestTemplateV2 = z.infer<typeof generationRequestTemplateV2Schema>;
+export type GenerationRequestV1 = z.infer<typeof generationRequestV1Schema>;
+export type GenerationRequestV2 = z.infer<typeof generationRequestV2Schema>;
 export type GenerationRequest = z.infer<typeof generationRequestSchema>;
+export type GenerationPreviewRequest = z.infer<typeof generationPreviewRequestSchema>;
+export type GenerationPreviewResponse = z.infer<typeof generationPreviewResponseSchema>;
 export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 export type ProviderStatusUpdate = z.infer<typeof providerStatusUpdateSchema>;
 export type ReconciliationResult = z.infer<typeof reconciliationResultSchema>;

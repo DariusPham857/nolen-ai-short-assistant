@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, foreignKey, index, jsonb, pgTable, text, timestamp, unique, uuid, varchar } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, foreignKey, index, integer, jsonb, pgTable, text, timestamp, unique, uuid, varchar } from 'drizzle-orm/pg-core';
 import { films } from './films.js';
 import { attempts } from './financial.js';
 import { shotRevisions, storyRevisionShots } from './stories.js';
@@ -79,4 +79,27 @@ export const shotAssetSelections = pgTable('shot_asset_selections', {
     foreignColumns: [shotRevisions.filmId, shotRevisions.id],
   }),
   check('shot_asset_selection_kind_valid', sql`${table.kind} IN ('IMAGE', 'VIDEO')`),
+]);
+
+export const filmReferenceAssets = pgTable('film_reference_assets', {
+  id: uuid('id').primaryKey(),
+  filmId: uuid('film_id').notNull().references(() => films.id, { onDelete: 'restrict' }),
+  storagePath: text('storage_path').notNull(),
+  sha256Hash: varchar('sha256_hash', { length: 64 }).notNull(),
+  mimeType: varchar('mime_type', { length: 64 }).notNull(),
+  byteSize: bigint('byte_size', { mode: 'bigint' }).notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  label: varchar('label', { length: 120 }).notNull(),
+  sourceNote: text('source_note').notNull(),
+  licenseUrl: text('license_url'),
+  rightsConfirmedBy: varchar('rights_confirmed_by', { length: 64 }).notNull(),
+  rightsConfirmedAt: timestamp('rights_confirmed_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  unique().on(table.filmId, table.sha256Hash),
+  unique().on(table.filmId, table.id),
+  check('reference_asset_mime_valid', sql`${table.mimeType} IN ('image/png', 'image/jpeg', 'image/webp')`),
+  check('reference_asset_byte_size_positive', sql`${table.byteSize} > 0`),
+  check('reference_asset_dimensions_valid', sql`${table.width} >= 300 AND ${table.width} <= 4096 AND ${table.height} >= 300 AND ${table.height} <= 4096 AND (${table.width} * ${table.height}) <= 16777216`),
 ]);

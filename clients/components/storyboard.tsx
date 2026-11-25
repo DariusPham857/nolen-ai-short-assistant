@@ -1,12 +1,31 @@
 'use client';
 import { useEffect, useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { expectedSchema, filmDtoSchema, formatMicros, saveStorySchema, storyContentSchema, type Expected, type Storyboard, type StoryContent, type ShotSpec } from '@nolen/contracts';
+import {
+  cameraAngleSchema,
+  createShotSpecV2,
+  expectedSchema,
+  filmDtoSchema,
+  formatMicros,
+  saveStorySchema,
+  storyContentSchema,
+  upgradeBibleToV2,
+  type BibleGroup,
+  type CameraAngle,
+  type Expected,
+  type GenerationPreviewResponse,
+  type ReferenceAssetDto,
+  type ShotSpec,
+  type Storyboard,
+  type StoryContent,
+} from '@nolen/contracts';
 import { Button } from './ui/button';
 import { Navigation } from './navigation';
 import { KeyframeReviewModal } from './keyframe-review';
 import { VideoReviewModal } from './video-review';
 import { errorMessage } from '../lib/api';
+
+const CAMERA_ANGLES = cameraAngleSchema.options;
 
 type Pending={key:string;route:string;body:unknown};
 type PendingAttempt={
@@ -19,6 +38,7 @@ type PendingAttempt={
   rateCardSnapshotId: string;
   pricingUnits: number;
   executionMode: 'REPLAY' | 'LIVE';
+  expectedPreviewHash: string;
   createdAt: number;
 };
 const routes=['revisions','mark-planned','submit-review','approve','waivers'];
@@ -28,10 +48,38 @@ function Field({label,value,onChange,multiline=false}:{label:string;value:string
   const id=useId();
   return <div className="text-xs text-zinc-400 space-y-1"><label htmlFor={id}>{label}</label>{multiline?<textarea id={id} className={inputClass} rows={3} value={value} onChange={e=>onChange(e.target.value)}/>:<input id={id} className={inputClass} value={value} onChange={e=>onChange(e.target.value)}/>}</div>;
 }
-/** Initial manual intent is visibly editable and carries no AI/provider provenance. */
+/** Initial manual intent is visibly editable as StoryBible v2 + ShotSpec v2 with explicit EYE_LEVEL angle. */
 function manualStory(brief:string):StoryContent {
   const state={locationId:'location',lighting:'Daylight',propIds:[],characterStates:[]};
-  return storyContentSchema.parse({script:brief,storyBible:{schemaVersion:'1',narrative:'Describe the visual direction',characters:[],wardrobes:[],props:[],locations:[{id:'location',name:'Location',description:'Describe the location'}],styleRefs:[{id:'style',name:'Style',description:'Describe the visual style'}]},scenes:[{clientRef:'scene-1',title:'Scene 1',shots:[{clientRef:'shot-1',spec:{shotType:'ESTABLISHING',durationSeconds:30,prompt:brief,camera:{framing:'Wide',movement:'Static'},styleRefId:'style',subjectIds:[],locationId:'location',continuity:{start:state,end:state}}}]}]});
+  return storyContentSchema.parse({
+    script:brief,
+    storyBible:{
+      schemaVersion:'2',
+      narrative:'Describe the visual direction',
+      characters:[],
+      wardrobes:[],
+      props:[],
+      locations:[{id:'location',name:'Location',description:'Describe the location',referenceAssetIds:[]}],
+      styleRefs:[{id:'style',name:'Style',description:'Describe the visual style',referenceAssetIds:[]}],
+    },
+    scenes:[{
+      clientRef:'scene-1',
+      title:'Scene 1',
+      shots:[{
+        clientRef:'shot-1',
+        spec:createShotSpecV2({
+          shotType:'ESTABLISHING',
+          durationSeconds:30,
+          prompt:brief,
+          camera:{angle:'EYE_LEVEL',framing:'Wide',movement:'Static'},
+          styleRefId:'style',
+          subjectIds:[],
+          locationId:'location',
+          continuity:{start:state,end:state},
+        }),
+      }],
+    }],
+  });
 }
 /** Restore only recognized command routes and request identities from tab-local storage. */
 function pendingFrom(raw:string):Pending {
@@ -57,6 +105,32 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const [executionMode,setExecutionMode]=useState<'REPLAY'|'LIVE'>('REPLAY');
   const [selectedVideoProvider,setSelectedVideoProvider]=useState<'RUNWAY'|'FAL_KLING'|'LOCAL_PAN_ZOOM'>('RUNWAY');
   const [shotMediaMap,setShotMediaMap]=useState<Record<string,{keyframeApproved:boolean;keyframePending:boolean;videoApproved:boolean;videoPending:boolean;attemptsCount:number}>>({});
+  const [referenceAssets,setReferenceAssets]=useState<ReferenceAssetDto[]>([]);
+  const [refLabel,setRefLabel]=useState('');
+  const [refSourceNote,setRefSourceNote]=useState('');
+  const [refLicenseUrl,setRefLicenseUrl]=useState('');
+  const [refRightsConfirmed,setRefRightsConfirmed]=useState(false);
+  const [refFile,setRefFile]=useState<File|null>(null);
+  const [refUploading,setRefUploading]=useState(false);
+  const [refError,setRefError]=useState<string|null>(null);
+  const [bindSelections,setBindSelections]=useState<Record<string,string>>({});
+  const [addShotPrompt,setAddShotPrompt]=useState<{sceneIndex:number;angle:CameraAngle}|null>(null);
+  const [duplicateV1Angle,setDuplicateV1Angle]=useState<CameraAngle|null>(null);
+  const [imagePreview,setImagePreview]=useState<GenerationPreviewResponse|null>(null);
+  const [videoPreview,setVideoPreview]=useState<GenerationPreviewResponse|null>(null);
+  const [previewError,setPreviewError]=useState<string|null>(null);
+  const [previewLoadingKind,setPreviewLoadingKind]=useState<'IMAGE'|'VIDEO'|null>(null);
+
+  async function refreshReferenceAssets() {
+    try {
+      const res = await fetch(`${base}/reference-assets`, { cache: 'no-store' });
+      if (res.ok) {
+        setReferenceAssets((await res.json()) as ReferenceAssetDto[]);
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
 
   async function refreshShotMedia(shots: { id?: string }[]) {
     const validShots = shots.filter(s => Boolean(s.id));
@@ -111,6 +185,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
       const allShots = next.scenes.flatMap(s => s.shots);
       void refreshShotMedia(allShots);
     }
+    void refreshReferenceAssets();
   }
   useEffect(()=>{void(async()=>{
     try{
@@ -119,7 +194,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
       if(rawAttempt){
         try{
           const parsed=JSON.parse(rawAttempt) as PendingAttempt;
-          if(parsed&&typeof parsed.key==='string'&&parsed.shotId&&parsed.kind)setPendingAttempt(parsed);
+          if(parsed&&typeof parsed.key==='string'&&parsed.shotId&&parsed.kind&&typeof parsed.expectedPreviewHash==='string')setPendingAttempt(parsed);
         }catch{}
       }
       await load(undefined,true);
@@ -173,6 +248,127 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const updateShot=(f:(s:ShotSpec)=>void)=>edit(c=>f(c.scenes[selected.scene].shots[selected.shot].spec));
   const total=content?.scenes.flatMap(s=>s.shots).reduce((n,s)=>n+s.spec.durationSeconds,0)??0;
 
+  async function fetchPreview(kind: 'IMAGE' | 'VIDEO'): Promise<GenerationPreviewResponse | null> {
+    if (!shot?.id || !board?.revision || !board.active || board.active.state !== 'APPROVED') return null;
+    const sRev = board.revision.shotRevisions[shot.id];
+    if (!sRev) return null;
+
+    const targetProvider = kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider;
+    const targetCard = rateCards.find(rc => rc.operation === kind && rc.provider === targetProvider);
+    if (!targetCard) return null;
+
+    setPreviewLoadingKind(kind);
+    setPreviewError(null);
+    try {
+      const res = await fetch(`${base}/generation-previews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storyRevisionId: board.active.id,
+          shotRevisionId: sRev.id,
+          kind,
+          rateCardSnapshotId: targetCard.id,
+          pricingUnits: kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1,
+          executionMode,
+        }),
+      });
+      if (!res.ok) {
+        const msg = await errorMessage(res);
+        setPreviewError(msg);
+        if (kind === 'IMAGE') setImagePreview(null);
+        else setVideoPreview(null);
+        return null;
+      }
+      const data = (await res.json()) as GenerationPreviewResponse;
+      if (kind === 'IMAGE') setImagePreview(data);
+      else setVideoPreview(data);
+      return data;
+    } catch {
+      setPreviewError('Failed to fetch server generation preview.');
+      return null;
+    } finally {
+      setPreviewLoadingKind(null);
+    }
+  }
+
+  const activeShotIdForEffect = shot?.id;
+  const activeShotRevIdForEffect = activeShotIdForEffect && board?.revision ? board.revision.shotRevisions[activeShotIdForEffect]?.id : undefined;
+  const activeStoryIdForEffect = board?.active?.id;
+  const activeStoryStateForEffect = board?.active?.state;
+  const activeShotMedia = activeShotIdForEffect ? shotMediaMap[activeShotIdForEffect] : undefined;
+  const activeKeyframeApproved = Boolean(activeShotMedia?.keyframeApproved);
+  const hasImageCard = rateCards.some(rc => rc.operation === 'IMAGE' && rc.provider === 'GEMINI');
+  const hasVideoCard = rateCards.some(rc => rc.operation === 'VIDEO' && rc.provider === selectedVideoProvider);
+
+  useEffect(() => {
+    setImagePreview(null);
+    setVideoPreview(null);
+    setPreviewError(null);
+    if (activeStoryStateForEffect !== 'APPROVED' || !activeStoryIdForEffect || !activeShotRevIdForEffect || historical) return;
+    if (hasImageCard) void fetchPreview('IMAGE');
+    if (hasVideoCard && activeKeyframeApproved) void fetchPreview('VIDEO');
+  }, [activeStoryIdForEffect, activeStoryStateForEffect, activeShotRevIdForEffect, executionMode, selectedVideoProvider, activeKeyframeApproved, hasImageCard, hasVideoCard, historical]);
+
+  async function handleReferenceUpload(e: React.FormEvent) {
+    e.preventDefault();
+    if (!refFile) {
+      setRefError('Select a PNG, JPEG, or WebP file.');
+      return;
+    }
+    setRefUploading(true);
+    setRefError(null);
+    try {
+      const form = new FormData();
+      form.set('file', refFile);
+      form.set('label', refLabel.trim());
+      form.set('sourceNote', refSourceNote.trim());
+      if (refLicenseUrl.trim()) form.set('licenseUrl', refLicenseUrl.trim());
+      form.set('rightsConfirmed', refRightsConfirmed ? 'true' : 'false');
+
+      const res = await fetch(`${base}/reference-assets`, {
+        method: 'POST',
+        body: form,
+      });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      setRefLabel('');
+      setRefSourceNote('');
+      setRefLicenseUrl('');
+      setRefRightsConfirmed(false);
+      setRefFile(null);
+      await refreshReferenceAssets();
+    } catch (err: unknown) {
+      setRefError(err instanceof Error ? err.message : 'Reference upload failed');
+    } finally {
+      setRefUploading(false);
+    }
+  }
+
+  function handleBindReference(group: BibleGroup, defId: string) {
+    if (!content) return;
+    const selectedAssetId = bindSelections[`${group}:${defId}`] ?? referenceAssets[0]?.id;
+    if (!selectedAssetId) {
+      setError('Upload a reference image before binding.');
+      return;
+    }
+    if (content.storyBible.schemaVersion === '1') {
+      const confirmed = window.confirm(
+        'Binding a reference asset will upgrade the Story Bible to v2, create a new DRAFT StoryRevision, and require re-approval (existing selection badges will reset). Continue?',
+      );
+      if (!confirmed) return;
+      edit(c => {
+        c.storyBible = upgradeBibleToV2(c.storyBible, { group, id: defId, assetId: selectedAssetId });
+      });
+      return;
+    }
+    edit(c => {
+      if (c.storyBible.schemaVersion !== '2') return;
+      const item = c.storyBible[group].find(x => x.id === defId);
+      if (item && !item.referenceAssetIds.includes(selectedAssetId)) {
+        item.referenceAssetIds.push(selectedAssetId);
+      }
+    });
+  }
+
   async function handleGenerate(kind: 'IMAGE' | 'VIDEO', retryPending?: PendingAttempt) {
     if (!shot?.id || !board?.revision || !board.active) return;
     const shotRev = board.revision.shotRevisions[shot.id];
@@ -206,16 +402,32 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
 
     let record: PendingAttempt;
     if (activePending) {
-      // RETRY: Send every field verbatim from the stored pending attempt
+      // RETRY: Send every field verbatim from the stored pending attempt (including expectedPreviewHash)
       record = activePending;
     } else {
-      // FRESH ATTEMPT: Derive from current workspace and selected provider
+      // FRESH ATTEMPT: Use authoritative server preview hash
       const targetProvider = kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider;
       const targetCard = rateCards.find(rc => rc.operation === kind && rc.provider === targetProvider);
       if (!targetCard) {
         setGeneratingKind(null);
         setGeneratingProgress(null);
         setGenerationError(`No active rate card found for provider ${targetProvider} (${kind}). Generation aborted.`);
+        return;
+      }
+
+      const activePreview = kind === 'IMAGE' ? imagePreview : videoPreview;
+      const resolvedPreview =
+        activePreview &&
+        activePreview.template.shotRevisionId === shotRev.id &&
+        activePreview.template.rateCardSnapshotId === targetCard.id &&
+        activePreview.template.executionMode === executionMode
+          ? activePreview
+          : await fetchPreview(kind);
+
+      if (!resolvedPreview) {
+        setGeneratingKind(null);
+        setGeneratingProgress(null);
+        setGenerationError('Authoritative server preview is required before generating.');
         return;
       }
 
@@ -229,6 +441,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
         rateCardSnapshotId: targetCard.id,
         pricingUnits: kind === 'VIDEO' ? Math.max(1, shot.spec.durationSeconds) : 1,
         executionMode,
+        expectedPreviewHash: resolvedPreview.previewHash,
         createdAt: Date.now(),
       };
 
@@ -259,8 +472,21 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
           rateCardSnapshotId: record.rateCardSnapshotId,
           pricingUnits: record.pricingUnits,
           executionMode: record.executionMode,
+          expectedPreviewHash: record.expectedPreviewHash,
         }),
       });
+
+      if (res.status === 409) {
+        const cloned = res.clone();
+        const errBody = await cloned.json().catch(() => null) as { error?: { code?: string } } | null;
+        if (errBody?.error?.code === 'GENERATION_PREVIEW_STALE') {
+          try { sessionStorage.removeItem(attemptSlot); } catch {}
+          setPendingAttempt(null);
+          if (kind === 'IMAGE') setImagePreview(null);
+          else setVideoPreview(null);
+          void load();
+        }
+      }
 
       if (!res.ok) throw new Error(await errorMessage(res));
       const receipt = (await res.json()) as { attemptId: string };
@@ -362,7 +588,37 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               </button>
             );
           })}
-          <Button variant="outline" onClick={()=>edit(c=>{const spec=structuredClone(c.scenes[si].shots[0]?.spec??manualStory('New shot').scenes[0].shots[0].spec);c.scenes[si].shots.push({clientRef:`shot-${crypto.randomUUID()}`,spec});})}>Add shot</Button>
+          <Button variant="outline" onClick={()=>setAddShotPrompt({sceneIndex:si,angle:'EYE_LEVEL'})}>Add shot</Button>
+          {addShotPrompt && addShotPrompt.sceneIndex === si && (
+            <div className="space-y-2 rounded border border-amber-700/60 bg-zinc-900/70 p-2 text-xs">
+              <label className="block">
+                New shot camera angle
+                <select
+                  className={inputClass}
+                  value={addShotPrompt.angle}
+                  onChange={e=>setAddShotPrompt({...addShotPrompt,angle:e.target.value as CameraAngle})}
+                >
+                  {CAMERA_ANGLES.map(a=><option key={a} value={a}>{a}</option>)}
+                </select>
+              </label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={()=>{
+                    edit(draft=>{
+                      const baseSpec=structuredClone(draft.scenes[si].shots[0]?.spec??manualStory('New shot').scenes[0].shots[0].spec);
+                      const nextSpec=createShotSpecV2({...baseSpec,camera:{angle:addShotPrompt.angle,framing:baseSpec.camera.framing,movement:baseSpec.camera.movement}});
+                      draft.scenes[si].shots.push({clientRef:`shot-${crypto.randomUUID()}`,spec:nextSpec});
+                    });
+                    setAddShotPrompt(null);
+                  }}
+                >
+                  Confirm add shot
+                </Button>
+                <Button type="button" variant="outline" onClick={()=>setAddShotPrompt(null)}>Cancel</Button>
+              </div>
+            </div>
+          )}
           <Button variant="outline" disabled={content.scenes.length<2} onClick={()=>{edit(c=>{c.scenes.splice(si,1);});setSelected({scene:0,shot:0});}}>Remove scene</Button>
           <Button variant="outline" disabled={si===0} onClick={()=>{edit(c=>{[c.scenes[si-1],c.scenes[si]]=[c.scenes[si],c.scenes[si-1]];});setSelected({scene:0,shot:0});}}>Move scene up</Button>
           <Button variant="outline" disabled={si===content.scenes.length-1} onClick={()=>{edit(c=>{[c.scenes[si+1],c.scenes[si]]=[c.scenes[si],c.scenes[si+1]];});setSelected({scene:0,shot:0});}}>Move scene down</Button>
@@ -370,14 +626,116 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
         <Button variant="outline" onClick={()=>edit(c=>{const scene=manualStory('New shot').scenes[0];scene.shots[0].spec=structuredClone(c.scenes[0].shots[0]?.spec??scene.shots[0].spec);scene.clientRef=`scene-${crypto.randomUUID()}`;scene.shots[0].clientRef=`shot-${crypto.randomUUID()}`;c.scenes.push(scene);})}>Add scene</Button>
       </aside>
       <section aria-label="Script and Story Bible" className="space-y-6 min-w-0"><Field label="Script" value={content.script} onChange={v=>edit(c=>{c.script=v;})} multiline/>
-        <h2 className="font-semibold">Story Bible</h2><Field label="Narrative and visual direction" value={content.storyBible.narrative} onChange={v=>edit(c=>{c.storyBible.narrative=v;})} multiline/>
-        {(['characters','wardrobes','props','locations','styleRefs'] as const).map(group=><section key={group} className="space-y-3 border-t border-zinc-800 pt-3"><h3 className="text-sm font-semibold">{group}</h3>{content.storyBible[group].map((d,i)=><div key={d.id} className="space-y-2"><Field label={`${group} ${i+1} name (${d.id})`} value={d.name} onChange={v=>edit(c=>{c.storyBible[group][i].name=v;})}/><Field label={`${d.name} definition`} value={d.description} onChange={v=>edit(c=>{c.storyBible[group][i].description=v;})} multiline/>{group==='props'&&<label className="text-sm"><input type="checkbox" checked={content.storyBible.props[i].hero} onChange={e=>edit(c=>{c.storyBible.props[i].hero=e.target.checked;})}/> Hero / brand-critical prop</label>}</div>)}<Button variant="outline" onClick={()=>edit(c=>{const definition={id:`ref-${crypto.randomUUID()}`,name:'New definition',description:'Describe the identity'};if(group==='props')c.storyBible.props.push({...definition,hero:false});else c.storyBible[group].push(definition);})}>Add {group}</Button></section>)}
+        <h2 className="font-semibold">Story Bible ({content.storyBible.schemaVersion === '2' ? 'v2' : 'v1'})</h2>
+        <Field label="Narrative and visual direction" value={content.storyBible.narrative} onChange={v=>edit(c=>{c.storyBible.narrative=v;})} multiline/>
+        <section aria-label="Reference Library" className="space-y-3 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+          <h3 className="text-sm font-semibold">Reference Library</h3>
+          <div className="space-y-2 text-xs">
+            <label className="block text-zinc-400">
+              Reference image (PNG/JPEG/WebP, 300–4096px)
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={e=>setRefFile(e.target.files?.[0]??null)}
+                className="mt-1 block w-full text-xs text-zinc-300"
+              />
+            </label>
+            <Field label="Reference label" value={refLabel} onChange={setRefLabel}/>
+            <Field label="Source note" value={refSourceNote} onChange={setRefSourceNote}/>
+            <Field label="License URL (optional)" value={refLicenseUrl} onChange={setRefLicenseUrl}/>
+            <label className="flex items-center gap-2 text-zinc-300">
+              <input type="checkbox" checked={refRightsConfirmed} onChange={e=>setRefRightsConfirmed(e.target.checked)}/>
+              <span>I confirm commercial/reference usage rights</span>
+            </label>
+            {refError && <p role="alert" className="text-rose-300">{refError}</p>}
+            <Button type="button" variant="outline" disabled={refUploading} onClick={e=>void handleReferenceUpload(e)}>
+              {refUploading ? 'Uploading…' : 'Upload reference'}
+            </Button>
+          </div>
+          {referenceAssets.length > 0 && (
+            <div className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-zinc-800">
+              {referenceAssets.map(ra=>(
+                <div key={ra.id} className="flex gap-2 rounded border border-zinc-800 bg-zinc-950/70 p-2 text-xs">
+                  <img src={ra.mediaUrl} alt={ra.label} className="h-14 w-14 rounded object-cover border border-zinc-800 shrink-0"/>
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="font-medium text-zinc-200 truncate">{ra.label}</p>
+                    <p className="text-[10px] font-mono text-zinc-400">{ra.width}×{ra.height} · {ra.mimeType}</p>
+                    <p className="text-[10px] text-zinc-400 truncate">Source: {ra.sourceNote}</p>
+                    <p className="text-[10px] text-emerald-400">Rights: {ra.rightsConfirmedBy}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        {(['characters','wardrobes','props','locations','styleRefs'] as const).map(group=><section key={group} className="space-y-3 border-t border-zinc-800 pt-3"><h3 className="text-sm font-semibold">{group}</h3>{content.storyBible[group].map((d,i)=>{
+          const boundIds = 'referenceAssetIds' in d ? d.referenceAssetIds : [];
+          const bindKey = `${group}:${d.id}`;
+          return <div key={d.id} className="space-y-2"><Field label={`${group} ${i+1} name (${d.id})`} value={d.name} onChange={v=>edit(c=>{c.storyBible[group][i].name=v;})}/><Field label={`${d.name} definition`} value={d.description} onChange={v=>edit(c=>{c.storyBible[group][i].description=v;})} multiline/>{group==='props'&&<label className="text-sm"><input type="checkbox" checked={content.storyBible.props[i].hero} onChange={e=>edit(c=>{content.storyBible.props[i].hero=e.target.checked;})}/> Hero / brand-critical prop</label>}
+            <div className="space-y-1 rounded border border-zinc-800/70 bg-zinc-950/50 p-2 text-xs">
+              <p className="text-zinc-400">Bound references ({boundIds.length})</p>
+              {boundIds.map(refId=>{
+                const meta = referenceAssets.find(r=>r.id===refId);
+                return <div key={refId} className="flex items-center justify-between gap-2">
+                  <span className="truncate text-zinc-300">{meta ? `${meta.label} (${meta.width}×${meta.height})` : refId}</span>
+                  <Button type="button" variant="outline" className="h-6 px-2 text-[10px]" onClick={()=>edit(c=>{if(c.storyBible.schemaVersion==='2'){const item=c.storyBible[group][i] as {referenceAssetIds:string[]};item.referenceAssetIds=item.referenceAssetIds.filter(x=>x!==refId);}})}>Unbind</Button>
+                </div>;
+              })}
+              {referenceAssets.length > 0 && (
+                <div className="flex gap-2 pt-1">
+                  <select
+                    aria-label={`Select reference for ${d.name}`}
+                    className={`${inputClass} h-7 py-0 text-xs`}
+                    value={bindSelections[bindKey] ?? referenceAssets[0].id}
+                    onChange={e=>setBindSelections(prev=>({...prev,[bindKey]:e.target.value}))}
+                  >
+                    {referenceAssets.map(ra=><option key={ra.id} value={ra.id}>{ra.label} ({ra.width}×{ra.height})</option>)}
+                  </select>
+                  <Button type="button" variant="outline" className="h-7 px-2 text-xs shrink-0" onClick={()=>handleBindReference(group, d.id)}>Bind reference</Button>
+                </div>
+              )}
+            </div>
+          </div>;
+        })}<Button variant="outline" onClick={()=>edit(c=>{
+          const id = `ref-${crypto.randomUUID()}`;
+          if (c.storyBible.schemaVersion === '2') {
+            const baseDef = { id, name: 'New definition', description: 'Describe the identity', referenceAssetIds: [] as string[] };
+            if (group === 'props') c.storyBible.props.push({ ...baseDef, hero: false });
+            else c.storyBible[group].push(baseDef);
+          } else {
+            const baseDef = { id, name: 'New definition', description: 'Describe the identity' };
+            if (group === 'props') c.storyBible.props.push({ ...baseDef, hero: false });
+            else c.storyBible[group].push(baseDef);
+          }
+        })}>Add {group}</Button></section>)}
       </section>
       <aside className="space-y-4 min-w-0"><h2 className="font-semibold">Shot inspector</h2>{shot&&<>
         <Field label="Shot prompt" value={shot.spec.prompt} onChange={v=>updateShot(s=>{s.prompt=v;})} multiline/>
         <Field label="Negative prompt" value={shot.spec.negativePrompt} onChange={v=>updateShot(s=>{s.negativePrompt=v;})} multiline/>
         <label className="block text-sm">Duration seconds<input className={inputClass} type="number" min={1} max={60} value={shot.spec.durationSeconds} onChange={e=>updateShot(s=>{s.durationSeconds=Number(e.target.value);})}/></label>
         <label className="block text-sm">Shot type<select className={inputClass} value={shot.spec.shotType} onChange={e=>updateShot(s=>{s.shotType=e.target.value as ShotSpec['shotType'];})}>{['CHARACTER','ACTION','DIALOGUE','ESTABLISHING','BROLL','INSERT','PRODUCT','OTHER'].map(t=><option key={t}>{t}</option>)}</select></label>
+        <div className="block text-sm">
+          <label htmlFor="shot-camera-angle" className="block text-sm">Camera angle</label>
+          <select
+            id="shot-camera-angle"
+            className={inputClass}
+            value={shot.spec.schemaVersion === '2' ? shot.spec.camera.angle : ''}
+            onChange={e=>{
+              const chosen = e.target.value as CameraAngle | '';
+              if (!chosen) return;
+              edit(c=>{
+                const cur = c.scenes[selected.scene].shots[selected.shot];
+                cur.spec = createShotSpecV2({
+                  ...cur.spec,
+                  camera: { angle: chosen, framing: cur.spec.camera.framing, movement: cur.spec.camera.movement },
+                });
+              });
+            }}
+          >
+            {shot.spec.schemaVersion === '1' && <option value="">Unspecified — legacy</option>}
+            {CAMERA_ANGLES.map(a=><option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
         <Field label="Camera framing" value={shot.spec.camera.framing} onChange={v=>updateShot(s=>{s.camera.framing=v;})}/><Field label="Camera movement" value={shot.spec.camera.movement} onChange={v=>updateShot(s=>{s.camera.movement=v;})}/>
         {(['locationId','styleRefId'] as const).map(field=><label key={field} className="block text-sm">{field==='locationId'?'Shot location':'Visual style'}<select className={inputClass} value={shot.spec[field]} onChange={e=>updateShot(s=>{s[field]=e.target.value;if(field==='locationId'){s.continuity.start.locationId=e.target.value;s.continuity.end.locationId=e.target.value;}})}>{content.storyBible[field==='locationId'?'locations':'styleRefs'].map(d=><option value={d.id} key={d.id}>{d.name}</option>)}</select></label>)}
         <section aria-label="Media Generation & Review" className="space-y-3 rounded border border-zinc-800 bg-zinc-900/50 p-3">
@@ -437,6 +795,15 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               <Button
                 variant="outline"
                 type="button"
+                disabled={disabled || !shot.id || !shotRev || !isStoryApproved || !activeImageRateCard || previewLoadingKind === 'IMAGE'}
+                onClick={() => void fetchPreview('IMAGE')}
+                className="text-xs h-8 border-zinc-700"
+              >
+                {previewLoadingKind === 'IMAGE' ? 'Previewing…' : 'Preview Keyframe'}
+              </Button>
+              <Button
+                variant="outline"
+                type="button"
                 disabled={
                   disabled ||
                   !shot.id ||
@@ -461,6 +828,15 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
                 </Button>
               )}
             </div>
+            {imagePreview && (
+              <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/60 p-2 text-[11px] space-y-1" data-testid="image-preview-panel">
+                <p className="font-mono text-zinc-400">Preview: {imagePreview.previewHash.slice(0, 12)}… · {imagePreview.template.modelId} · {imagePreview.template.prompt.length} chars</p>
+                {imagePreview.template.fixtureId && <p className="font-mono text-amber-300">Fixture: {imagePreview.template.fixturePackVersion}/{imagePreview.template.fixtureId}</p>}
+                <pre className="whitespace-pre-wrap text-zinc-200 font-sans text-[11px] max-h-28 overflow-y-auto">{imagePreview.template.prompt}</pre>
+                {imagePreview.template.negativePrompt && <p className="text-zinc-400">Negative: {imagePreview.template.negativePrompt}</p>}
+                <p className="text-zinc-400">Input references: {imagePreview.template.inputAssets.length} ({imagePreview.template.inputAssets.map(a => a.role).join(', ') || 'none'})</p>
+              </div>
+            )}
           </div>
 
           {/* Video Section */}
@@ -516,6 +892,15 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               <Button
                 variant="outline"
                 type="button"
+                disabled={disabled || !shot.id || !shotRev || !isStoryApproved || isVideoBlockedByKeyframe || !activeVideoRateCard || previewLoadingKind === 'VIDEO'}
+                onClick={() => void fetchPreview('VIDEO')}
+                className="text-xs h-8 border-zinc-700"
+              >
+                {previewLoadingKind === 'VIDEO' ? 'Previewing…' : 'Preview Video'}
+              </Button>
+              <Button
+                variant="outline"
+                type="button"
                 disabled={
                   disabled ||
                   !shot.id ||
@@ -542,6 +927,15 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
                 </Button>
               )}
             </div>
+            {videoPreview && (
+              <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/60 p-2 text-[11px] space-y-1" data-testid="video-preview-panel">
+                <p className="font-mono text-zinc-400">Preview: {videoPreview.previewHash.slice(0, 12)}… · {videoPreview.template.modelId} · {videoPreview.template.durationSeconds}s · {videoPreview.template.prompt.length} chars</p>
+                {videoPreview.template.fixtureId && <p className="font-mono text-amber-300">Fixture: {videoPreview.template.fixturePackVersion}/{videoPreview.template.fixtureId}</p>}
+                <pre className="whitespace-pre-wrap text-zinc-200 font-sans text-[11px] max-h-28 overflow-y-auto">{videoPreview.template.prompt}</pre>
+                <p className="text-zinc-400">Inputs: {videoPreview.template.inputAssets.map(a => `${a.role}:${a.assetId.slice(0, 8)}`).join(', ')}</p>
+              </div>
+            )}
+            {previewError && <p role="alert" className="text-[11px] text-rose-300">{previewError}</p>}
           </div>
 
           {/* Preserved Pending / Uncertain Attempt Recovery Widget */}
@@ -646,7 +1040,31 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" disabled={selected.shot===0} onClick={()=>{edit(c=>{const a=c.scenes[selected.scene].shots;[a[selected.shot-1],a[selected.shot]]=[a[selected.shot],a[selected.shot-1]];});setSelected(s=>({...s,shot:s.shot-1}));}}>Move shot up</Button>
           <Button variant="outline" disabled={selected.shot===content.scenes[selected.scene].shots.length-1} onClick={()=>{edit(c=>{const a=c.scenes[selected.scene].shots;[a[selected.shot+1],a[selected.shot]]=[a[selected.shot],a[selected.shot+1]];});setSelected(s=>({...s,shot:s.shot+1}));}}>Move shot down</Button>
-          <Button variant="outline" onClick={()=>edit(c=>{c.scenes[selected.scene].shots.splice(selected.shot+1,0,{clientRef:`shot-${crypto.randomUUID()}`,spec:structuredClone(shot.spec)});})}>Duplicate shot</Button>
+          <Button variant="outline" onClick={()=>{
+            if (shot.spec.schemaVersion === '1') {
+              setDuplicateV1Angle('EYE_LEVEL');
+              return;
+            }
+            edit(c=>{c.scenes[selected.scene].shots.splice(selected.shot+1,0,{clientRef:`shot-${crypto.randomUUID()}`,spec:structuredClone(shot.spec)});});
+          }}>Duplicate shot</Button>
+          {duplicateV1Angle && shot.spec.schemaVersion === '1' && (
+            <div className="w-full space-y-2 rounded border border-amber-700/60 bg-zinc-900/70 p-2 text-xs">
+              <label className="block">
+                Select camera angle to duplicate legacy shot
+                <select className={inputClass} value={duplicateV1Angle} onChange={e=>setDuplicateV1Angle(e.target.value as CameraAngle)}>
+                  {CAMERA_ANGLES.map(a=><option key={a} value={a}>{a}</option>)}
+                </select>
+              </label>
+              <div className="flex gap-2">
+                <Button type="button" onClick={()=>{
+                  const nextSpec = createShotSpecV2({ ...shot.spec, camera: { angle: duplicateV1Angle, framing: shot.spec.camera.framing, movement: shot.spec.camera.movement } });
+                  edit(c=>{c.scenes[selected.scene].shots.splice(selected.shot+1,0,{clientRef:`shot-${crypto.randomUUID()}`,spec:nextSpec});});
+                  setDuplicateV1Angle(null);
+                }}>Confirm duplicate</Button>
+                <Button type="button" variant="outline" onClick={()=>setDuplicateV1Angle(null)}>Cancel</Button>
+              </div>
+            </div>
+          )}
           <Button variant="outline" disabled={content.scenes[selected.scene].shots.length<2} onClick={()=>{edit(c=>{c.scenes[selected.scene].shots.splice(selected.shot,1);});setSelected(s=>({...s,shot:0}));}}>Remove shot</Button>
         </div>
         {content.scenes.length>1&&<label className="block text-sm">Move to scene<select className={inputClass} value={selected.scene} onChange={e=>{const target=Number(e.target.value);edit(c=>{const [moved]=c.scenes[selected.scene].shots.splice(selected.shot,1);c.scenes[target].shots.push(moved);});setSelected({scene:target,shot:content.scenes[target].shots.length});}}>{content.scenes.map((s,i)=><option key={s.clientRef} value={i}>{s.title}</option>)}</select></label>}

@@ -1,6 +1,23 @@
 import { Hono } from 'hono';
-import { createAttemptSchema, estimateAttemptSchema, reconcileAttemptSchema, updateBudgetSchema } from '@nolen/contracts';
-import { admitAttempt, changeBudget, estimateAttempt, listRateCards, readAttemptFinancial, readBudget, readLedger, readSummary, reconcileAttempt } from '../financial/repository.js';
+import {
+  createAttemptSchema,
+  estimateAttemptSchema,
+  generationPreviewRequestSchema,
+  reconcileAttemptSchema,
+  updateBudgetSchema,
+} from '@nolen/contracts';
+import {
+  admitAttempt,
+  changeBudget,
+  estimateAttempt,
+  listRateCards,
+  previewGeneration,
+  readAttemptFinancial,
+  readBudget,
+  readLedger,
+  readSummary,
+  reconcileAttempt,
+} from '../financial/repository.js';
 import { ApiFailure } from './errors.js';
 import { boundedJson, installBoundary, keySchema, requireOperator, resourceId } from './boundary.js';
 
@@ -20,6 +37,7 @@ export function createFinancialApi(){
   api.get('/api/films/:filmId/budget',async c=>c.json(await readBudget(resourceId(c.req.param('filmId')),await requireOperator(c))));
   api.post('/api/films/:filmId/budget/estimate',async c=>c.json(await estimateAttempt(resourceId(c.req.param('filmId')),await requireOperator(c),estimateAttemptSchema.parse(await boundedJson(c.req.raw,16384)))));
   api.patch('/api/films/:filmId/budget',async c=>c.json(await changeBudget(resourceId(c.req.param('filmId')),await requireOperator(c),requiredKey(c.req.header('Idempotency-Key')),updateBudgetSchema.parse(await boundedJson(c.req.raw,16384)))));
+  api.post('/api/films/:filmId/generation-previews',async c=>c.json(await previewGeneration(resourceId(c.req.param('filmId')),await requireOperator(c),generationPreviewRequestSchema.parse(await boundedJson(c.req.raw,16384)))));
   api.post('/api/films/:filmId/attempts',async c=>c.json(await admitAttempt(resourceId(c.req.param('filmId')),await requireOperator(c),requiredKey(c.req.header('Idempotency-Key')),createAttemptSchema.parse(await boundedJson(c.req.raw,16384))),201));
   api.get('/api/films/:filmId/costs/ledger',async c=>c.json(await readLedger(resourceId(c.req.param('filmId')),await requireOperator(c))));
   api.get('/api/films/:filmId/costs/summary',async c=>c.json(await readSummary(resourceId(c.req.param('filmId')),await requireOperator(c))));
@@ -27,7 +45,7 @@ export function createFinancialApi(){
   api.post('/api/attempts/:attemptId/reconcile',async c=>c.json(await reconcileAttempt(resourceId(c.req.param('attemptId')),await requireOperator(c),requiredKey(c.req.header('Idempotency-Key')),reconcileAttemptSchema.parse(await boundedJson(c.req.raw,16384)))));
   for(const [route,allow] of [
     ['/api/rate-cards','GET'],
-    ['/api/films/:filmId/budget','GET, PATCH'],['/api/films/:filmId/budget/estimate','POST'],['/api/films/:filmId/attempts','POST'],
+    ['/api/films/:filmId/budget','GET, PATCH'],['/api/films/:filmId/budget/estimate','POST'],['/api/films/:filmId/generation-previews','POST'],['/api/films/:filmId/attempts','POST'],
     ['/api/films/:filmId/costs/ledger','GET'],['/api/films/:filmId/costs/summary','GET'],['/api/attempts/:attemptId/financials','GET'],['/api/attempts/:attemptId/reconcile','POST'],
   ] as const)api.all(route,c=>{c.header('Allow',allow);throw new ApiFailure(405,'METHOD_NOT_ALLOWED','Method not supported');});
   return api;

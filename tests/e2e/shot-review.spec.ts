@@ -105,6 +105,9 @@ test('EP-05: Exact provider selection dispatches matching rate card without sile
     });
   });
 
+  // Wait for authoritative server preview before dispatching
+  await expect(page.getByTestId('image-preview-panel')).toBeVisible();
+
   // Generate keyframe
   const generateKeyframeBtn = page.getByRole('button', { name: 'Generate Keyframe', exact: true });
   await generateKeyframeBtn.click();
@@ -112,10 +115,13 @@ test('EP-05: Exact provider selection dispatches matching rate card without sile
   expect(interceptedBody).not.toBeNull();
   expect(interceptedBody?.kind).toBe('IMAGE');
   expect(interceptedBody?.rateCardSnapshotId).toBe(geminiCard!.id);
+  expect(typeof interceptedBody?.expectedPreviewHash).toBe('string');
+  expect(String(interceptedBody?.expectedPreviewHash)).toMatch(/^[a-f0-9]{64}$/);
 });
 
 test('EP-05: Lost attempt response preserves retry identity across retries', async ({ page }) => {
   await openStoryboard(page);
+  await expect(page.getByTestId('image-preview-panel')).toBeVisible();
 
   // Intercept attempts endpoint and abort to simulate lost connection
   let originalKey = '';
@@ -168,6 +174,7 @@ test('EP-05: Lost attempt response preserves retry identity across retries', asy
   expect(retriedBody?.rateCardSnapshotId).toBe(originalBody?.rateCardSnapshotId);
   expect(retriedBody?.pricingUnits).toBe(originalBody?.pricingUnits);
   expect(retriedBody?.executionMode).toBe(originalBody?.executionMode);
+  expect(retriedBody?.expectedPreviewHash).toBe(originalBody?.expectedPreviewHash);
 });
 
 test('EP-05: Video review modal opens and displays review controls', async ({ page }) => {
@@ -189,6 +196,7 @@ test('EP-05: Video review modal opens and displays review controls', async ({ pa
 
 test('EP-05: Pending attempt on Shot 1 locks fresh generation on Shot 2 and preserves record A', async ({ page }) => {
   const filmId = await openStoryboard(page);
+  await expect(page.getByTestId('image-preview-panel')).toBeVisible();
 
   // 1. Intercept attempts endpoint and abort to simulate lost connection on Shot 1
   let shot1Key = '';

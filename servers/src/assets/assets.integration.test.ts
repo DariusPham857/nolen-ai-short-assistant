@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { shotAttemptDtoSchema } from '@nolen/contracts';
+import { canonicalStoryV2, shotAttemptDtoSchema } from '@nolen/contracts';
 import { digest, unlock } from '../auth/sessions.js';
 import { runtimeConfig } from '../config/runtime.js';
 import { pgClient } from '../db/index.js';
@@ -32,6 +32,36 @@ async function request(route: string, method = 'GET', body?: unknown, headers: R
   });
 }
 
+async function previewAndAdmitHttp(
+  filmId: string,
+  body: {
+    storyRevisionId: string;
+    shotRevisionId: string;
+    kind: 'IMAGE' | 'VIDEO';
+    rateCardSnapshotId: string;
+    pricingUnits: number;
+    executionMode?: 'LIVE' | 'REPLAY';
+  },
+  headers: Record<string, string> = { 'Idempotency-Key': randomUUID() },
+): Promise<Response> {
+  const previewRes = await request(`/api/films/${filmId}/generation-previews`, 'POST', {
+    storyRevisionId: body.storyRevisionId,
+    shotRevisionId: body.shotRevisionId,
+    kind: body.kind,
+    rateCardSnapshotId: body.rateCardSnapshotId,
+    pricingUnits: body.pricingUnits,
+    executionMode: body.executionMode ?? 'REPLAY',
+  });
+  if (!previewRes.ok) return previewRes;
+  const preview = (await previewRes.json()) as { previewHash: string };
+  return request(
+    `/api/films/${filmId}/attempts`,
+    'POST',
+    { ...body, expectedPreviewHash: preview.previewHash },
+    headers,
+  );
+}
+
 type FixtureOptions = {
   budget?: string;
   keyframePolicy?: 'REQUIRED' | 'OPTIONAL';
@@ -59,9 +89,11 @@ async function createFixture(opts: FixtureOptions = {}) {
     await tx`INSERT INTO budget_limit_events(id, film_id, actor_id, prior_limit_usd_micros, new_limit_usd_micros, reason)
       VALUES(${randomUUID()}, ${filmId}, 'local-operator', ${budget}, ${budget}, 'test baseline')`;
 
-    // 2. Story Revision (Approved)
+    // 2. Story Revision (Approved) with valid StoryContent v2 + ShotSpec v2
+    const storyContent = canonicalStoryV2();
+    const shotSpec = storyContent.scenes[0].shots[0].spec;
     await tx`INSERT INTO story_revisions(id, film_id, revision_no, state, content, content_hash)
-      VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', '{"title":"Test"}'::jsonb, 'fixture-content-hash')`;
+      VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', ${JSON.stringify({ content: storyContent })}::jsonb, 'fixture-content-hash')`;
     await tx`UPDATE films SET active_story_revision_id=${storyRevisionId}, status='PLANNING' WHERE id=${filmId}`;
 
     await tx`INSERT INTO story_validations(id, story_revision_id, context, dependency_hash, rule_set_version, findings)
@@ -87,7 +119,7 @@ async function createFixture(opts: FixtureOptions = {}) {
 
     await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${filmId})`;
     await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-      VALUES(${shotRevisionId}, ${filmId}, ${shotId}, '{"prompt":"Hero walking"}'::jsonb, 'dep-hash-1', ${JSON.stringify({ effectiveRequirement: keyframePolicy })}::jsonb)`;
+      VALUES(${shotRevisionId}, ${filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-1', ${JSON.stringify({ effectiveRequirement: keyframePolicy })}::jsonb)`;
     await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
       VALUES(${filmId}, ${storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
 
@@ -168,9 +200,9 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-AT-02: Deterministic review & video admission gating (Approval Path)', async () => {
     const f = await createFixture();
 
-    // 1. Admit keyframe (IMAGE) attempt
+    // 1. Admit keyframe (IMAGE) attempt via preview + admit
     const imgKey = randomUUID();
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -196,6 +228,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: '0'.repeat(64),
     }, { 'Idempotency-Key': vidKey1 });
     expect(vidResBefore.status).toBe(409);
     const errBody = await vidResBefore.json() as { error: { code: string } };
@@ -223,7 +256,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
 
     // 5. Try to dispatch VIDEO attempt now -> must succeed (201 QUEUED)
     const vidKey2 = randomUUID();
-    const vidResAfter = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const vidResAfter = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'VIDEO',
@@ -237,7 +270,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     const f = await createFixture();
 
     const imgKey = randomUUID();
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -294,6 +327,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: '0'.repeat(64),
     }, { 'Idempotency-Key': randomUUID() });
     expect(vidRes.status).toBe(409);
     expect(((await vidRes.json()) as { error: { code: string } }).error.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
@@ -304,7 +338,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
 
     // Setup approved keyframe for shot revision 1
     const imgKey = randomUUID();
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -320,7 +354,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     });
 
     // Video for ShotRevision 1 is admitted
-    const vidRes1 = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const vidRes1 = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'VIDEO',
@@ -335,8 +369,11 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     const val2Id = randomUUID();
 
     await pgClient.begin(async tx => {
+      const rev2Content = canonicalStoryV2();
+      const rev2Spec = rev2Content.scenes[0].shots[0].spec;
+      rev2Spec.prompt = 'Hero running';
       await tx`INSERT INTO story_revisions(id, film_id, parent_id, revision_no, state, content, content_hash)
-        VALUES(${storyRev2Id}, ${f.filmId}, ${f.storyRevisionId}, 2, 'APPROVED', '{"title":"Rev2"}'::jsonb, 'content-hash-2')`;
+        VALUES(${storyRev2Id}, ${f.filmId}, ${f.storyRevisionId}, 2, 'APPROVED', ${JSON.stringify({ content: rev2Content })}::jsonb, 'content-hash-2')`;
       await tx`UPDATE films SET active_story_revision_id=${storyRev2Id} WHERE id=${f.filmId}`;
 
       await tx`INSERT INTO story_validations(id, story_revision_id, context, dependency_hash, rule_set_version, findings)
@@ -358,7 +395,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
         VALUES(${f.filmId}, ${storyRev2Id}, ${f.sceneId}, 1)`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRev2Id}, ${f.filmId}, ${f.shotId}, '{"prompt":"Hero running"}'::jsonb, 'dep-hash-2', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
+        VALUES(${shotRev2Id}, ${f.filmId}, ${f.shotId}, ${JSON.stringify(rev2Spec)}::jsonb, 'dep-hash-2', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${f.filmId}, ${storyRev2Id}, ${f.sceneId}, ${f.shotId}, ${shotRev2Id}, 1)`;
     });
@@ -370,6 +407,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: '0'.repeat(64),
     }, { 'Idempotency-Key': randomUUID() });
     expect(vidRes2.status).toBe(409);
     expect(((await vidRes2.json()) as { error: { code: string } }).error.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
@@ -377,6 +415,18 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
 
   it('KF-AT-05: Concurrency serialization & lock ordering (Barrier test)', async () => {
     const f = await createFixture();
+
+    // Pre-compute authoritative preview before locking film row
+    const previewRes = await request(`/api/films/${f.filmId}/generation-previews`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    });
+    expect(previewRes.status).toBe(200);
+    const { previewHash } = (await previewRes.json()) as { previewHash: string };
 
     // Lock film row in an open transaction
     let unlockFilm!: () => void;
@@ -404,6 +454,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'IMAGE',
       rateCardSnapshotId: f.imageRateId,
       pricingUnits: 1,
+      expectedPreviewHash: previewHash,
     }, { 'Idempotency-Key': randomUUID() });
 
     // Wait until admitAttempt is observed waiting on the film lock via pg_blocking_pids
@@ -433,7 +484,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-AT-06: Optimistic concurrency conflict on review (expectedReviewCount)', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -465,7 +516,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-AT-07: Shot revision mismatch rejection', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -488,7 +539,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-AT-08: Media streaming & containment', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -524,6 +575,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: '0'.repeat(64),
     }, { 'Idempotency-Key': randomUUID() });
     expect(vidResBefore.status).toBe(409);
     const errBody = await vidResBefore.json() as { error?: { code: string } };
@@ -531,7 +583,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
 
     // 2. Synthesize and approve keyframe
     const imgKey = randomUUID();
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -556,7 +608,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     });
 
     // 3. Dispatching VIDEO attempt with approved keyframe succeeds
-    const vidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const vidRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'VIDEO',
@@ -569,7 +621,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-AT-10: Fake asset producer isolation', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -594,7 +646,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-BLOCK-1: Missing or tampered asset file fails closed with INTEGRITY_CHECK_FAILED', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -637,7 +689,17 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     });
     expect(approveRes.status).toBe(200);
 
-    // 1C. Tamper with file AFTER approval, then attempt VIDEO dispatch
+    // 1C. Capture valid preview before tampering, then tamper with file AFTER approval
+    const preTamperPreviewRes = await request(`/api/films/${f.filmId}/generation-previews`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    });
+    expect(preTamperPreviewRes.status).toBe(200);
+    const { previewHash: vidPreviewHash } = (await preTamperPreviewRes.json()) as { previewHash: string };
+
     await storage.write('keyframes', filename, Buffer.from('post-approval tampering'));
     const tamperVidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
       storyRevisionId: f.storyRevisionId,
@@ -645,6 +707,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: vidPreviewHash,
     }, { 'Idempotency-Key': randomUUID() });
     expect(tamperVidRes.status).toBe(409);
     expect(((await tamperVidRes.json()) as { error: { code: string } }).error.code).toBe('INTEGRITY_CHECK_FAILED');
@@ -657,13 +720,14 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: vidPreviewHash,
     }, { 'Idempotency-Key': randomUUID() });
     expect(missingVidRes.status).toBe(409);
     expect(((await missingVidRes.json()) as { error: { code: string } }).error.code).toBe('INTEGRITY_CHECK_FAILED');
 
     // Restore file and verify VIDEO dispatch succeeds
     await storage.write('keyframes', filename, originalFile);
-    const validVidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const validVidRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'VIDEO',
@@ -676,7 +740,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-BLOCK-2: Media download requires operator authentication and film ownership', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -711,7 +775,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-BLOCK-3: storeAsset enforces attempt provenance and composite foreign key rejects tampering', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -780,7 +844,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
   it('KF-BLOCK-4: asset_reviews is strictly append-only (UPDATE and DELETE rejected by trigger)', async () => {
     const f = await createFixture();
 
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -816,15 +880,16 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     const shotBId = randomUUID();
     const shotRevBId = randomUUID();
     await pgClient.begin(async tx => {
+      const shotBSpec = canonicalStoryV2().scenes[0].shots[1].spec;
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotBId}, ${f.filmId})`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRevBId}, ${f.filmId}, ${shotBId}, '{"prompt":"Shot B"}'::jsonb, 'dep-b', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
+        VALUES(${shotRevBId}, ${f.filmId}, ${shotBId}, ${JSON.stringify(shotBSpec)}::jsonb, 'dep-b', '{"effectiveRequirement":"REQUIRED"}'::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${f.filmId}, ${f.storyRevisionId}, ${f.sceneId}, ${shotBId}, ${shotRevBId}, 2)`;
     });
 
     // Create and approve image keyframe asset for Shot A
-    const imgResA = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgResA = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -871,6 +936,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'VIDEO',
       rateCardSnapshotId: f.videoRateId,
       pricingUnits: 5,
+      expectedPreviewHash: '0'.repeat(64),
     }, { 'Idempotency-Key': randomUUID() });
     expect(vidResB.status).toBe(409);
     expect(((await vidResB.json()) as { error: { code: string } }).error.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
@@ -883,7 +949,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     const f = await createFixture();
 
     // 1. Admit Attempt 1 and produce Asset 1
-    const img1Res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const img1Res = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -901,7 +967,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     });
 
     // 2. Admit Attempt 2 and produce Asset 2
-    const img2Res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const img2Res = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -919,7 +985,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     });
 
     // 3. Admit Attempt 3 and produce Asset 3, then REJECT it
-    const img3Res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const img3Res = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -979,7 +1045,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     const f = await createFixture();
 
     // 1. Admit Attempt 1 (IMAGE)
-    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const imgRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -997,7 +1063,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     });
 
     // 2. Also admit attempts and transition them to SUBMITTED and SUBMISSION_UNCERTAIN
-    const subRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const subRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
@@ -1009,7 +1075,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     const { attemptId: submittedId } = await subRes.json() as { attemptId: string };
     await pgClient`UPDATE attempts SET state = 'SUBMITTED' WHERE id = ${submittedId}`;
 
-    const uncRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+    const uncRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { storyContentSchema, storyStateSchema, policySchema, type StoryContent, type Expected, type StorySnapshot, type Storyboard, type Validation } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { ApiFailure } from '../http/errors.js';
+import { verifyStoryBibleReferences } from '../assets/reference-repository.js';
 import { hash, policy, referenceErrors, RULESET, shotDependency, validate } from './domain.js';
 
 type Tx=postgres.TransactionSql;
@@ -59,6 +60,7 @@ export async function command(filmId:string,operator:string,key:string|null,kind
       if(!input.content)throw new ApiFailure(422,'VALIDATION_ERROR','Story content required');
       const errors=referenceErrors(input.content);
       if(errors.length)throw new ApiFailure(422,'VALIDATION_ERROR','Resolve Story references and structural errors',errors);
+      await verifyStoryBibleReferences(tx, filmId, input.content.storyBible);
       const content=structuredClone(input.content);
       const knownScenes=await tx<{id:string}[]>`SELECT id FROM scenes WHERE film_id=${filmId}`;
       const knownShots=await tx<{id:string}[]>`SELECT id FROM shots WHERE film_id=${filmId}`;
