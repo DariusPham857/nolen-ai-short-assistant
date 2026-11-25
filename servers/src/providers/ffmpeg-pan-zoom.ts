@@ -44,10 +44,11 @@ export interface RenderLocalPanZoomInput {
 export interface RenderLocalPanZoomOptions {
   ffmpegBin?: string;
   ffprobeBin?: string;
-  ffmpegArgsOverride?: string[];
+  ffmpegArgsOverride?: string[] | ((tempInPath: string, tempOutPath: string) => string[]);
   ffprobeArgsOverride?: string[];
   timeoutMs?: number;
   maxOutputBytes?: number;
+  simulateCrashAt?: 'BEFORE_PUBLISH';
 }
 
 export interface RenderedLocalMp4Result {
@@ -390,7 +391,10 @@ export async function renderLocalPanZoomMp4(
     await fs.writeFile(tempInPath, startBuffer);
 
     const ffmpegBin = options?.ffmpegBin ?? 'ffmpeg';
-    const args = options?.ffmpegArgsOverride ?? [
+    const args =
+      typeof options?.ffmpegArgsOverride === 'function'
+        ? options.ffmpegArgsOverride(tempInPath, tempOutPath)
+        : (options?.ffmpegArgsOverride ?? [
       '-v',
       'error',
       '-y',
@@ -418,7 +422,7 @@ export async function renderLocalPanZoomMp4(
       '+faststart',
       '-an',
       tempOutPath,
-    ];
+    ]);
 
     const res = await runFileSubprocess(
       ffmpegBin,
@@ -439,12 +443,44 @@ export async function renderLocalPanZoomMp4(
     await probeRenderedMp4(tempOutPath, input.durationSeconds, options);
 
     const mp4Buffer = await fs.readFile(tempOutPath);
-    const filename = `${createHash('sha256').update(mp4Buffer).digest('hex')}.mp4`;
-    const stored = await input.storage.write('videos', filename, mp4Buffer);
+    const sha256Hash = createHash('sha256').update(mp4Buffer).digest('hex');
+    const filename = `${sha256Hash}.mp4`;
+
+    // Fsync staged MP4 and publish atomically via hard-link without truncating or overwriting existing blobs
+    const fh = await fs.open(tempOutPath, 'r+');
+    try {
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+
+    if (options?.simulateCrashAt === 'BEFORE_PUBLISH') {
+      throw new Error('SIMULATED_CRASH_BEFORE_PUBLISH');
+    }
+
+    input.storage.resolveDir('videos');
+    const targetPath = input.storage.resolve('videos', filename);
+    try {
+      await fs.link(tempOutPath, targetPath);
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'EEXIST') {
+        throw err;
+      }
+      const existingData = await fs.readFile(targetPath);
+      const existingHash = createHash('sha256').update(existingData).digest('hex');
+      if (existingHash !== sha256Hash) {
+        throw new LocalPanZoomError(
+          'LOCAL_OUTPUT_INVALID',
+          409,
+          `Existing video blob ${filename} failed SHA-256 integrity check`,
+        );
+      }
+    }
 
     return {
       storagePath: `videos/${filename}`,
-      sha256Hash: stored.sha256,
+      sha256Hash,
       byteSize: mp4Buffer.byteLength,
       durationSeconds: input.durationSeconds,
       width: TARGET_WIDTH,

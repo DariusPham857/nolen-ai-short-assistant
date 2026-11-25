@@ -34,8 +34,8 @@ Source: [spec](spec.md)
   - **GREEN Evidence**: `5 passed (5)` files / `21 passed (21)` tests.
 - **LP-02 Unit Renderer (`servers/src/providers/ffmpeg-pan-zoom.test.ts`):**
   - **Command**: `pnpm --filter @nolen/server test src/providers/providers.test.ts src/providers/ffmpeg-pan-zoom.test.ts`
-  - **RED Evidence (before `ffmpeg-pan-zoom.ts`)**: `Cannot find module './ffmpeg-pan-zoom.js'`
-  - **GREEN Evidence**: `2 passed (2)` files / `13 passed (13)` tests (`ffmpeg-pan-zoom.test.ts` 6/6, `providers.test.ts` 7/7).
+  - **Initial Failure (setup/import only, NOT behavioral RED)**: `Cannot find module './ffmpeg-pan-zoom.js'` (module did not exist yet; gap noted: no separate behavioral-assertion RED run was recorded before implementing `ffmpeg-pan-zoom.ts`).
+  - **GREEN Evidence**: `2 passed (2)` files / `15 passed (15)` tests (`ffmpeg-pan-zoom.test.ts` 8/8 including atomic non-overwrite `fs.link`, `BEFORE_PUBLISH` crash, and `LIVE` `LocalPanZoomAdapter` contract/schema tests; `providers.test.ts` 7/7).
 - **Post-final-edit Verification Matrix (2026-11-26, branch `feature/local-pan-zoom`):**
   - `pnpm typecheck` (`@nolen/contracts`, `@nolen/server`, `@nolen/web`): **PASS**
   - `pnpm lint` (`--max-warnings 0`): **PASS**
