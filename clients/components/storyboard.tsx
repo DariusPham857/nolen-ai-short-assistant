@@ -98,7 +98,31 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const [selected,setSelected]=useState({scene:0,shot:0});const [proposal,setProposal]=useState(false);
   const [keyframeModalOpen,setKeyframeModalOpen]=useState(false);
   const [videoModalOpen,setVideoModalOpen]=useState(false);
-  const [rateCards,setRateCards]=useState<{id:string;provider:string;model:string;operation:string;rateType:string;unitPriceUsdMicros:string}[]>([]);
+type RateCardSummary = {
+  id: string;
+  provider: string;
+  model: string;
+  operation: string;
+  rateType: string;
+  unitPriceUsdMicros: string;
+  sourceRef?: string;
+};
+
+function pickRateCardForMode(
+  cards: RateCardSummary[],
+  operation: 'IMAGE' | 'VIDEO',
+  provider: string,
+  mode: 'REPLAY' | 'LIVE',
+): RateCardSummary | undefined {
+  const matches = cards.filter(rc => rc.operation === operation && rc.provider === provider);
+  if (mode === 'LIVE') {
+    if (provider !== 'LOCAL_PAN_ZOOM') return undefined;
+    return matches.find(rc => rc.sourceRef && !rc.sourceRef.includes('MODELED_ONLY'));
+  }
+  return matches.find(rc => !rc.sourceRef || rc.sourceRef.includes('MODELED_ONLY')) ?? matches[0];
+}
+
+  const [rateCards,setRateCards]=useState<RateCardSummary[]>([]);
   const [generatingKind,setGeneratingKind]=useState<'IMAGE'|'VIDEO'|null>(null);
   const [generatingProgress,setGeneratingProgress]=useState<string|null>(null);
   const [generationError,setGenerationError]=useState<string|null>(null);
@@ -254,7 +278,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
     if (!sRev) return null;
 
     const targetProvider = kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider;
-    const targetCard = rateCards.find(rc => rc.operation === kind && rc.provider === targetProvider);
+    const targetCard = pickRateCardForMode(rateCards, kind, targetProvider, executionMode);
     if (!targetCard) return null;
 
     setPreviewLoadingKind(kind);
@@ -297,8 +321,8 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const activeStoryStateForEffect = board?.active?.state;
   const activeShotMedia = activeShotIdForEffect ? shotMediaMap[activeShotIdForEffect] : undefined;
   const activeKeyframeApproved = Boolean(activeShotMedia?.keyframeApproved);
-  const hasImageCard = rateCards.some(rc => rc.operation === 'IMAGE' && rc.provider === 'GEMINI');
-  const hasVideoCard = rateCards.some(rc => rc.operation === 'VIDEO' && rc.provider === selectedVideoProvider);
+  const hasImageCard = Boolean(pickRateCardForMode(rateCards, 'IMAGE', 'GEMINI', executionMode));
+  const hasVideoCard = Boolean(pickRateCardForMode(rateCards, 'VIDEO', selectedVideoProvider, executionMode));
 
   useEffect(() => {
     setImagePreview(null);
@@ -407,11 +431,15 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
     } else {
       // FRESH ATTEMPT: Use authoritative server preview hash
       const targetProvider = kind === 'IMAGE' ? 'GEMINI' : selectedVideoProvider;
-      const targetCard = rateCards.find(rc => rc.operation === kind && rc.provider === targetProvider);
+      const targetCard = pickRateCardForMode(rateCards, kind, targetProvider, executionMode);
       if (!targetCard) {
         setGeneratingKind(null);
         setGeneratingProgress(null);
-        setGenerationError(`No active rate card found for provider ${targetProvider} (${kind}). Generation aborted.`);
+        setGenerationError(
+          executionMode === 'LIVE' && targetProvider !== 'LOCAL_PAN_ZOOM'
+            ? `LIVE execution is unavailable for ${targetProvider}; select LOCAL_PAN_ZOOM for verified $0 local synthesis or switch to REPLAY.`
+            : `No active rate card found for provider ${targetProvider} (${kind}). Generation aborted.`,
+        );
         return;
       }
 
@@ -535,8 +563,8 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const isKeyframeRequired = shotRev?.policy.effectiveRequirement === 'REQUIRED';
   // Provider-gated: all current video engines (Runway I2V, fal Kling I2V, Local Pan/Zoom) require an approved keyframe
   const isVideoBlockedByKeyframe = !currentMedia.keyframeApproved;
-  const activeVideoRateCard = rateCards.find(rc => rc.operation === 'VIDEO' && rc.provider === selectedVideoProvider);
-  const activeImageRateCard = rateCards.find(rc => rc.operation === 'IMAGE' && rc.provider === 'GEMINI');
+  const activeVideoRateCard = pickRateCardForMode(rateCards, 'VIDEO', selectedVideoProvider, executionMode);
+  const activeImageRateCard = pickRateCardForMode(rateCards, 'IMAGE', 'GEMINI', executionMode);
 
   if(!board&&!error)return <div role="status" className="h-64 animate-pulse bg-zinc-900 rounded">Loading storyboard…</div>;
   return <div data-story-workspace>
@@ -884,7 +912,9 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
               </p>
             ) : !activeVideoRateCard ? (
               <p className="text-[11px] text-rose-400/90 bg-rose-950/30 border border-rose-900/50 rounded p-1.5">
-                No active rate card for {selectedVideoProvider}. Generation disabled.
+                {executionMode === 'LIVE' && selectedVideoProvider !== 'LOCAL_PAN_ZOOM'
+                  ? `LIVE mode supports verified LOCAL_PAN_ZOOM video synthesis only; select "Local Pan/Zoom" or switch to REPLAY.`
+                  : `No active rate card for ${selectedVideoProvider}. Generation disabled.`}
               </p>
             ) : null}
 

@@ -219,8 +219,16 @@ async function resolveAuthoritativeMediaTemplate(
     throw new ApiFailure(422, 'RATE_CARD_UNSUPPORTED', 'Rate card does not support this attempt kind');
   }
 
+  const provider = resolveProviderKind(rate.provider);
   const executionMode = input.executionMode ?? 'REPLAY';
   const isReplay = executionMode === 'REPLAY';
+  if (!isReplay && provider !== 'LOCAL_PAN_ZOOM') {
+    throw new ApiFailure(
+      422,
+      'LIVE_PROVIDER_UNAVAILABLE',
+      `LIVE execution for ${provider} is not configured yet; only LOCAL_PAN_ZOOM supports LIVE execution`,
+    );
+  }
   if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
     throw new ApiFailure(
       422,
@@ -289,7 +297,6 @@ async function resolveAuthoritativeMediaTemplate(
     referenceAssets.set(id, { id, sha256Hash: row.sha256_hash, mimeType: row.mime_type });
   }
 
-  const provider = resolveProviderKind(rate.provider);
   const defaultFixture = isReplay && !input.fixtureId
     ? resolveDefaultFixture({ provider, kind: input.kind, aspectRatio: '9:16' })
     : null;
@@ -578,6 +585,7 @@ export async function listRateCards(): Promise<{
   operation: string;
   rateType: string;
   unitPriceUsdMicros: string;
+  sourceRef: string;
 }[]> {
   const rows = await pgClient<{
     id: string;
@@ -586,11 +594,12 @@ export async function listRateCards(): Promise<{
     operation: string;
     rate_type: string;
     unit_price_usd_micros: string;
+    source_ref: string;
   }[]>`
-    SELECT id, provider, model, operation, rate_type, unit_price_usd_micros
+    SELECT id, provider, model, operation, rate_type, unit_price_usd_micros, source_ref
     FROM rate_card_snapshots
     WHERE effective_at <= now() AND expires_at > now()
-    ORDER BY operation, provider
+    ORDER BY operation, provider, id
   `;
   return rows.map(r => ({
     id: r.id,
@@ -599,6 +608,7 @@ export async function listRateCards(): Promise<{
     operation: r.operation,
     rateType: r.rate_type,
     unitPriceUsdMicros: String(r.unit_price_usd_micros),
+    sourceRef: r.source_ref,
   }));
 }
 

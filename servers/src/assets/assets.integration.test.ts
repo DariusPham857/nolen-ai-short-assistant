@@ -620,22 +620,46 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
 
   it('KF-AT-10: Fake asset producer isolation', async () => {
     const f = await createFixture();
+    const localVideoRateId = randomUUID();
+    await pgClient`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+      VALUES(${localVideoRateId}, 'LOCAL_PAN_ZOOM', 'ffmpeg-pan-zoom', 'VIDEO', 'FIXED_PER_REQUEST', 0, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED test card')`;
 
-    const imgRes = await previewAndAdmitHttp(f.filmId, {
+    // Approved REPLAY keyframe required as START_FRAME before admitting VIDEO
+    const kfRes = await previewAndAdmitHttp(f.filmId, {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
       kind: 'IMAGE',
       rateCardSnapshotId: f.imageRateId,
       pricingUnits: 1,
+      executionMode: 'REPLAY',
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(kfRes.status).toBe(201);
+    const { attemptId: kfAttemptId } = await kfRes.json() as { attemptId: string };
+    const kfAsset = await fakeAssetProducer({ filmId: f.filmId, attemptId: kfAttemptId, shotRevisionId: f.shotRevisionId, kind: 'IMAGE' });
+    await request(`/api/assets/${kfAsset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+      reason: 'Approved replay keyframe',
+    });
+
+    // LIVE admission with LOCAL_PAN_ZOOM creates exactly 1 RESERVATION_CREATED ledger event
+    const vidRes = await previewAndAdmitHttp(f.filmId, {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: localVideoRateId,
+      pricingUnits: 5,
       executionMode: 'LIVE',
     }, { 'Idempotency-Key': randomUUID() });
-    const { attemptId } = await imgRes.json() as { attemptId: string };
+    expect(vidRes.status).toBe(201);
+    const { attemptId } = await vidRes.json() as { attemptId: string };
 
     const ledgerBefore = await pgClient`SELECT * FROM cost_ledger_events WHERE film_id = ${f.filmId}`;
-    expect(ledgerBefore).toHaveLength(1); // RESERVATION_CREATED from attempt admission
+    expect(ledgerBefore).toHaveLength(1); // RESERVATION_CREATED from LIVE attempt admission
 
     // Generate fake asset
-    const asset = await fakeAssetProducer({ filmId: f.filmId, attemptId, shotRevisionId: f.shotRevisionId });
+    const asset = await fakeAssetProducer({ filmId: f.filmId, attemptId, shotRevisionId: f.shotRevisionId, kind: 'VIDEO' });
     expect(asset.id).toBeDefined();
 
     // Verify no additional financial ledger events were created by the fake asset producer

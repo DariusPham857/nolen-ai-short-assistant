@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.check.json",
     "lint": "eslint src/ --max-warnings 0",
     "test": "vitest run",
-    "test:media": "vitest run src/lib/media-validation.media.test.ts",
+    "test:media": "vitest run src/lib/media-validation.media.test.ts src/providers/ffmpeg-pan-zoom.media.test.ts",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "health:check": "tsx src/scripts/health-check.ts",

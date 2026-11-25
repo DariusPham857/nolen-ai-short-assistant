@@ -14,6 +14,7 @@ export const providerKindSchema = z.enum([
 export const provenanceSchema = z.enum([
   'LIVE_PROVIDER',
   'REPLAY_FIXTURE',
+  'LOCAL_PIPELINE',
 ]);
 
 export const dispatchStateSchema = z.enum([
@@ -39,7 +40,27 @@ export const assetLocatorSchema = z.discriminatedUnion('kind', [
     kind: z.literal('REMOTE_URL'),
     url: z.string().url(),
   }),
+  z.object({
+    kind: z.literal('LOCAL_STORAGE'),
+    category: z.literal('videos'),
+    filename: z.string().min(1).max(255).refine(
+      v => !v.includes('..') && !v.includes('/') && !v.includes('\\'),
+      { message: 'filename must be a basename without path separators' },
+    ),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
 ]);
+
+export const localVideoMetadataSchema = z.object({
+  provenance: z.literal('LOCAL_PIPELINE'),
+  executionMode: z.literal('LIVE'),
+  provider: z.literal('LOCAL_PAN_ZOOM'),
+  cameraMovement: z.string().min(1).max(2000),
+  durationSeconds: z.number().int().min(1).max(60),
+  startFrameAssetId: z.string().uuid(),
+  startFrameSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  startFrameProvenance: z.enum(['LIVE_PROVIDER', 'REPLAY_FIXTURE']),
+}).strict();
 
 /** Legacy v1 GenerationRequest retained for historical outbox compatibility and TTS/ASSEMBLY. */
 export const generationRequestV1Schema = z.object({
@@ -230,6 +251,21 @@ export const providerStatusUpdateSchema = z.object({
         path: ['locator'],
       });
     }
+  } else if (data.provenance === 'LOCAL_PIPELINE') {
+    if (data.mediaUrl !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'LOCAL_PIPELINE must not have mediaUrl (remote URL forbidden)',
+        path: ['mediaUrl'],
+      });
+    }
+    if (data.locator && data.locator.kind !== 'LOCAL_STORAGE') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'LOCAL_PIPELINE provenance requires LOCAL_STORAGE locator',
+        path: ['locator'],
+      });
+    }
   }
 });
 
@@ -263,3 +299,4 @@ export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 export type ProviderStatusUpdate = z.infer<typeof providerStatusUpdateSchema>;
 export type ReconciliationResult = z.infer<typeof reconciliationResultSchema>;
 export type AssetLocator = z.infer<typeof assetLocatorSchema>;
+export type LocalVideoMetadata = z.infer<typeof localVideoMetadataSchema>;

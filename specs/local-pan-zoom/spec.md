@@ -1,6 +1,6 @@
 # LP-001 — Deterministic Local FFmpeg Pan/Zoom (`LIVE` + `LOCAL_PAN_ZOOM`)
 
-Status: DRAFT_FOR_APPROVAL
+Status: IMPLEMENTED_VERIFIED_PENDING_OWNER_SIGNOFF
 Source: [PRD v1.0 §12, §17, §20](../../docs/PRD/PRD_AI_Short_Film_Assistant_v1.0.md), [AGENTS.md](../../AGENTS.md), [CS-001](../compose-storage/spec.md), [PD-001](../provider-dispatch/spec.md)
 
 ## Goal
@@ -73,4 +73,4 @@ Source: [PRD v1.0 §12, §17, §20](../../docs/PRD/PRD_AI_Short_Film_Assistant_v
 
 ## Open Questions / Blocked Contracts
 
-- Pending owner approval of `LP-00` spec/tasks before starting `LP-01` implementation.
+- Remote `LIVE` paid provider adapters (`GEMINI`, `RUNWAY`, `FAL_KLING`) remain intentionally blocked (`422 LIVE_PROVIDER_UNAVAILABLE`) until `PD-05b-CORE`.
