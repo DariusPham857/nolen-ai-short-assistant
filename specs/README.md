@@ -9,5 +9,6 @@ Source: [ENG-DEC-001](../docs/development/ENG-DEC-001.md).
 - [Financial Integrity & Atomic Budget Admission](financial-integrity/spec.md) and [implementation evidence](financial-integrity/tasks.md)
 - [Keyframe Approval Gate & Asset Lifecycle](keyframe-approval/spec.md) and [implementation tasks](keyframe-approval/tasks.md)
 - [Provider Dispatch & Financial Settlement](provider-dispatch/spec.md) and [implementation tasks](provider-dispatch/tasks.md)
+- [Shot Video Generation & Review Workstation](shot-review/spec.md) and [implementation tasks](shot-review/tasks.md)
 
 Commands and gate limitations: [verification](../docs/development/verification.md).

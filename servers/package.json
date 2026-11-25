@@ -6,7 +6,7 @@
   "description": "AI-Powered Short Film Production Assistant — Backend Server & Worker",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && node scripts/copy-migrations.mjs",
+    "build": "tsc && node scripts/copy-migrations.mjs && node scripts/copy-fixtures.mjs",
     "start": "node dist/index.js",
     "worker": "tsx watch src/worker/index.ts",
     "worker:start": "node dist/worker/index.js",

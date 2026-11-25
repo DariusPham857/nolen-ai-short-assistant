@@ -9,6 +9,7 @@
 import "dotenv/config";
 import { db, pgClient } from "./index.js";
 import { films } from "./schema/index.js";
+import { seedBaselineRateCards } from "./seed-rate-cards.js";
 
 async function seed() {
   console.log("[seed] Starting database seed...");
@@ -33,6 +34,10 @@ async function seed() {
   } else {
     console.log("[seed] Films already exist, skipping.");
   }
+
+  // Provision illustrative baseline rate card snapshots (PRD v1.0 §1265-1267, DEC-P03)
+  await seedBaselineRateCards(pgClient);
+  console.log("[seed] Provisioned verified rate cards.");
 
   console.log("[seed] Seed complete.");
   await pgClient.end();

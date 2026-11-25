@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { shotAttemptDtoSchema } from '@nolen/contracts';
 import { digest, unlock } from '../auth/sessions.js';
 import { runtimeConfig } from '../config/runtime.js';
 import { pgClient } from '../db/index.js';
@@ -515,7 +517,45 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     // Shot revision with OPTIONAL keyframe requirement
     const f = await createFixture({ keyframePolicy: 'OPTIONAL' });
 
-    // Dispatching VIDEO attempt without keyframe must SUCCEED directly
+    // 1. Dispatching image-driven VIDEO attempt without keyframe must be rejected with 409 KEYFRAME_APPROVAL_REQUIRED
+    const vidResBefore = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: f.videoRateId,
+      pricingUnits: 5,
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(vidResBefore.status).toBe(409);
+    const errBody = await vidResBefore.json() as { error?: { code: string } };
+    expect(errBody.error?.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
+
+    // 2. Synthesize and approve keyframe
+    const imgKey = randomUUID();
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': imgKey });
+    expect(imgRes.status).toBe(201);
+    const { attemptId: imgAttemptId } = await imgRes.json() as { attemptId: string };
+
+    const keyframeAsset = await fakeAssetProducer({
+      filmId: f.filmId,
+      attemptId: imgAttemptId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+    });
+
+    await request(`/api/assets/${keyframeAsset.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+      reason: 'Approved keyframe for optional shot',
+    });
+
+    // 3. Dispatching VIDEO attempt with approved keyframe succeeds
     const vidRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
       storyRevisionId: f.storyRevisionId,
       shotRevisionId: f.shotRevisionId,
@@ -535,6 +575,7 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
       kind: 'IMAGE',
       rateCardSnapshotId: f.imageRateId,
       pricingUnits: 1,
+      executionMode: 'LIVE',
     }, { 'Idempotency-Key': randomUUID() });
     const { attemptId } = await imgRes.json() as { attemptId: string };
 
@@ -833,5 +874,168 @@ describe('EP-03 / KF-001: Keyframe Approval Gate & Asset Lifecycle', () => {
     }, { 'Idempotency-Key': randomUUID() });
     expect(vidResB.status).toBe(409);
     expect(((await vidResB.json()) as { error: { code: string } }).error.code).toBe('KEYFRAME_APPROVAL_REQUIRED');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // EP-05: Shot Asset Selection & Attempts History Integration
+  // ─────────────────────────────────────────────────────────────────────────
+  it('EP-05: selectShotAsset selects approved asset and rejects non-approved or mismatched asset', async () => {
+    const f = await createFixture();
+
+    // 1. Admit Attempt 1 and produce Asset 1
+    const img1Res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId: att1Id } = await img1Res.json() as { attemptId: string };
+    const asset1 = await fakeAssetProducer({ filmId: f.filmId, attemptId: att1Id, shotRevisionId: f.shotRevisionId });
+
+    // Approve Asset 1
+    await request(`/api/assets/${asset1.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+
+    // 2. Admit Attempt 2 and produce Asset 2
+    const img2Res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId: att2Id } = await img2Res.json() as { attemptId: string };
+    const asset2 = await fakeAssetProducer({ filmId: f.filmId, attemptId: att2Id, shotRevisionId: f.shotRevisionId });
+
+    // Approve Asset 2 -> by default reviewAsset automatically selects the newly approved asset
+    await request(`/api/assets/${asset2.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+
+    // 3. Admit Attempt 3 and produce Asset 3, then REJECT it
+    const img3Res = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId: att3Id } = await img3Res.json() as { attemptId: string };
+    const asset3 = await fakeAssetProducer({ filmId: f.filmId, attemptId: att3Id, shotRevisionId: f.shotRevisionId });
+
+    await request(`/api/assets/${asset3.id}/review`, 'POST', {
+      decision: 'REJECTED',
+      reason: 'Lighting is too dark',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+
+    // Verify Asset 2 is currently selected
+    const assetsInitial = await (await request(`/api/films/${f.filmId}/shots/${f.shotId}/assets`, 'GET')).json() as { id: string; isSelected: boolean }[];
+    const a2 = assetsInitial.find(a => a.id === asset2.id);
+    const a1 = assetsInitial.find(a => a.id === asset1.id);
+    expect(a2?.isSelected).toBe(true);
+    expect(a1?.isSelected).toBe(false);
+
+    // Switch selection back to Asset 1 via POST /api/films/:id/shots/:shotId/selections
+    const selectRes = await request(`/api/films/${f.filmId}/shots/${f.shotId}/selections`, 'POST', {
+      assetId: asset1.id,
+      kind: 'IMAGE',
+    });
+    expect(selectRes.status).toBe(200);
+    const selJson = await selectRes.json() as { assetId: string; reviewDecision: string; kind: string };
+    expect(selJson.assetId).toBe(asset1.id);
+    expect(selJson.reviewDecision).toBe('APPROVED');
+
+    // Verify Asset 1 is now selected, Asset 2 is unselected
+    const assetsUpdated = await (await request(`/api/films/${f.filmId}/shots/${f.shotId}/assets`, 'GET')).json() as { id: string; isSelected: boolean }[];
+    expect(assetsUpdated.find(a => a.id === asset1.id)?.isSelected).toBe(true);
+    expect(assetsUpdated.find(a => a.id === asset2.id)?.isSelected).toBe(false);
+
+    // Attempting to select rejected Asset 3 must fail with 422 ASSET_NOT_APPROVED
+    const rejSelectRes = await request(`/api/films/${f.filmId}/shots/${f.shotId}/selections`, 'POST', {
+      assetId: asset3.id,
+      kind: 'IMAGE',
+    });
+    expect(rejSelectRes.status).toBe(422);
+    expect(((await rejSelectRes.json()) as { error: { code: string } }).error.code).toBe('ASSET_NOT_APPROVED');
+
+    // Attempting to select with mismatched kind (e.g. VIDEO for image asset) must fail with 422 ASSET_KIND_MISMATCH
+    const misKindRes = await request(`/api/films/${f.filmId}/shots/${f.shotId}/selections`, 'POST', {
+      assetId: asset1.id,
+      kind: 'VIDEO',
+    });
+    expect(misKindRes.status).toBe(422);
+    expect(((await misKindRes.json()) as { error: { code: string } }).error.code).toBe('ASSET_KIND_MISMATCH');
+  });
+
+  it('EP-05: getShotAttempts returns all attempts for the shot with status, asset link and selection state', async () => {
+    const f = await createFixture();
+
+    // 1. Admit Attempt 1 (IMAGE)
+    const imgRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    }, { 'Idempotency-Key': randomUUID() });
+    const { attemptId: att1Id } = await imgRes.json() as { attemptId: string };
+    const asset1 = await fakeAssetProducer({ filmId: f.filmId, attemptId: att1Id, shotRevisionId: f.shotRevisionId });
+
+    await request(`/api/assets/${asset1.id}/review`, 'POST', {
+      decision: 'APPROVED',
+      expectedShotRevisionId: f.shotRevisionId,
+      expectedReviewCount: 0,
+    });
+
+    // 2. Also admit attempts and transition them to SUBMITTED and SUBMISSION_UNCERTAIN
+    const subRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(subRes.status).toBe(201);
+    const { attemptId: submittedId } = await subRes.json() as { attemptId: string };
+    await pgClient`UPDATE attempts SET state = 'SUBMITTED' WHERE id = ${submittedId}`;
+
+    const uncRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+      storyRevisionId: f.storyRevisionId,
+      shotRevisionId: f.shotRevisionId,
+      kind: 'IMAGE',
+      rateCardSnapshotId: f.imageRateId,
+      pricingUnits: 1,
+      executionMode: 'REPLAY',
+    }, { 'Idempotency-Key': randomUUID() });
+    expect(uncRes.status).toBe(201);
+    const { attemptId: uncertainId } = await uncRes.json() as { attemptId: string };
+    await pgClient`UPDATE attempts SET state = 'SUBMISSION_UNCERTAIN' WHERE id = ${uncertainId}`;
+
+    // 3. Query attempts endpoint and parse entire response with shared shotAttemptDtoSchema
+    const attemptsRes = await request(`/api/films/${f.filmId}/shots/${f.shotId}/attempts`, 'GET');
+    expect(attemptsRes.status).toBe(200);
+    const attempts = z.array(shotAttemptDtoSchema).parse(await attemptsRes.json());
+
+    expect(attempts.length).toBeGreaterThanOrEqual(3);
+    const found = attempts.find(a => a.id === att1Id);
+    expect(found).toBeDefined();
+    expect(found?.kind).toBe('IMAGE');
+    expect(found?.executionMode).toBe('REPLAY');
+    expect(found?.assetId).toBe(asset1.id);
+    expect(found?.latestReviewDecision).toBe('APPROVED');
+    expect(found?.isSelected).toBe(true);
+
+    expect(attempts.find(a => a.id === submittedId)?.state).toBe('SUBMITTED');
+    expect(attempts.find(a => a.id === uncertainId)?.state).toBe('SUBMISSION_UNCERTAIN');
   });
 });

@@ -64,11 +64,13 @@ export const attempts = pgTable('attempts', {
   rateCardSnapshotId: uuid('rate_card_snapshot_id').notNull().references(() => rateCardSnapshots.id),
   pricingUnits: integer('pricing_units').notNull(),
   reservationUsdMicros: money('reservation_usd_micros').notNull(),
+  executionMode: text('execution_mode').notNull().default('REPLAY'),
   state: text('state').notNull().default('QUEUED'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   check('attempt_kind_valid', sql`${table.kind} IN ('IMAGE','VIDEO','TTS','ASSEMBLY')`),
   check('attempt_state_valid', sql`${table.state} IN ('QUEUED','SUBMITTED','SUBMISSION_UNCERTAIN','RUNNING','SUCCEEDED','FAILED','CANCELED')`),
+  check('attempt_execution_mode_valid', sql`${table.executionMode} IN ('LIVE','REPLAY')`),
   check('attempt_values_valid', sql`${table.pricingUnits} > 0 AND ${table.reservationUsdMicros} >= 0`),
   foreignKey({ columns: [table.filmId, table.storyRevisionId], foreignColumns: [storyRevisions.filmId, storyRevisions.id] }),
   foreignKey({ columns: [table.filmId, table.shotRevisionId], foreignColumns: [shotRevisions.filmId, shotRevisions.id] }),
@@ -149,6 +151,6 @@ export const outboundDispatches = pgTable('outbound_dispatches', {
   claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
-  check('outbound_dispatch_state_valid', sql`${table.state} IN ('NOT_STARTED','SUBMITTING','SUBMITTED','SUBMISSION_UNCERTAIN')`),
+  check('outbound_dispatch_state_valid', sql`${table.state} IN ('NOT_STARTED','SUBMITTING','SUBMITTED','SUBMISSION_UNCERTAIN','SUCCEEDED','FAILED')`),
 ]);
 

@@ -84,16 +84,37 @@ describe('Provider Dispatch Contracts (PD-01)', () => {
       providerJobId: 'gemini-task-999',
       state: 'SUCCEEDED',
       provenance: 'REPLAY_FIXTURE',
-      mediaUrl: 'https://storage.googleapis.com/test-bucket/asset.png',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-gemini-image-9-16',
+      },
     };
     expect(providerStatusUpdateSchema.parse(update).state).toBe('SUCCEEDED');
     expect(providerStatusUpdateSchema.parse(update).provenance).toBe('REPLAY_FIXTURE');
+
+    // REPLAY_FIXTURE with remote mediaUrl throws (BLOCK 2)
+    expect(() => providerStatusUpdateSchema.parse({
+      providerJobId: 'gemini-task-999',
+      state: 'SUCCEEDED',
+      provenance: 'REPLAY_FIXTURE',
+      mediaUrl: 'https://storage.googleapis.com/test-bucket/asset.png',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-gemini-image-9-16',
+      },
+    })).toThrow();
 
     // Missing provenance throws
     expect(() => providerStatusUpdateSchema.parse({
       providerJobId: 'gemini-task-999',
       state: 'SUCCEEDED',
-      mediaUrl: 'https://storage.googleapis.com/test-bucket/asset.png',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-gemini-image-9-16',
+      },
     })).toThrow();
 
     const reconcile = {
@@ -104,5 +125,106 @@ describe('Provider Dispatch Contracts (PD-01)', () => {
     };
     const parsedReconcile = reconciliationResultSchema.parse(reconcile);
     expect(parsedReconcile.outcome).toBe('CONFIRMED_FAILED_NO_CHARGE');
+  });
+
+  it('validates discriminated asset locator (REPLAY_FIXTURE vs REMOTE_URL) on ProviderStatusUpdate (PD-05a.1)', () => {
+    const replayUpdate = {
+      providerJobId: 'gemini-task-999',
+      state: 'SUCCEEDED',
+      provenance: 'REPLAY_FIXTURE',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'gemini-keyframe-01',
+      },
+    };
+    const parsed = providerStatusUpdateSchema.parse(replayUpdate);
+    expect(parsed.locator).toBeDefined();
+    expect(parsed.locator?.kind).toBe('REPLAY_FIXTURE');
+
+    const remoteUpdate = {
+      providerJobId: 'runway-job-abc-123',
+      state: 'SUCCEEDED',
+      provenance: 'LIVE_PROVIDER',
+      locator: {
+        kind: 'REMOTE_URL',
+        url: 'https://cdn.provider.com/video.mp4',
+      },
+    };
+    const parsedRemote = providerStatusUpdateSchema.parse(remoteUpdate);
+    expect(parsedRemote.locator?.kind).toBe('REMOTE_URL');
+
+    // Cross-pair negative assertions (BLOCK 3 / mode boundary containment):
+    // 1. REPLAY_FIXTURE with REMOTE_URL locator must fail closed to prevent SSRF and network leakage in REPLAY
+    expect(() => providerStatusUpdateSchema.parse({
+      providerJobId: 'gemini-task-999',
+      state: 'SUCCEEDED',
+      provenance: 'REPLAY_FIXTURE',
+      locator: {
+        kind: 'REMOTE_URL',
+        url: 'https://cdn.example.com/asset.mp4',
+      },
+    })).toThrow();
+
+    // 2. LIVE_PROVIDER with REPLAY_FIXTURE locator must fail closed to prevent fake local fixture usage in LIVE
+    expect(() => providerStatusUpdateSchema.parse({
+      providerJobId: 'runway-job-abc-123',
+      state: 'SUCCEEDED',
+      provenance: 'LIVE_PROVIDER',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'gemini-keyframe-01',
+      },
+    })).toThrow();
+
+    // Invalid locator kind or structure fails
+    expect(() => providerStatusUpdateSchema.parse({
+      ...replayUpdate,
+      locator: { kind: 'INVALID_LOCATOR_KIND' },
+    })).toThrow();
+  });
+
+  it('validates GenerationRequest with frozen fixture identity and 64-char hex requestFingerprint (PD-05a.1)', () => {
+    const replayReq = {
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      filmId: '22222222-2222-4222-8222-222222222222',
+      kind: 'IMAGE',
+      provider: 'GEMINI',
+      executionMode: 'REPLAY',
+      fixturePackVersion: 'v1',
+      fixtureId: 'gemini-kf-01',
+      requestFingerprint: 'a'.repeat(64),
+      prompt: 'A cinematic establishing shot of a neon coffee shop in rainy Tokyo',
+    };
+    const parsed = generationRequestSchema.parse(replayReq);
+    expect(parsed.fixturePackVersion).toBe('v1');
+    expect(parsed.fixtureId).toBe('gemini-kf-01');
+    expect(parsed.requestFingerprint).toBe('a'.repeat(64));
+
+    // Invalid fingerprint (not 64-char hex) fails
+    expect(() => generationRequestSchema.parse({
+      ...replayReq,
+      requestFingerprint: 'not-valid-hex-64',
+    })).toThrow();
+    expect(() => generationRequestSchema.parse({
+      ...replayReq,
+      requestFingerprint: 'A'.repeat(64), // uppercase rejected
+    })).toThrow();
+    expect(() => generationRequestSchema.parse({
+      ...replayReq,
+      requestFingerprint: 'a'.repeat(63), // length 63 rejected
+    })).toThrow();
+
+    // BLOCK 2: Strictly rejects directory traversal in fixturePackVersion
+    expect(() => generationRequestSchema.parse({
+      ...replayReq,
+      fixturePackVersion: 'x/../replay-pack-v1',
+    })).toThrow(/fixturePackVersion/i);
+
+    expect(() => generationRequestSchema.parse({
+      ...replayReq,
+      fixturePackVersion: '../v1',
+    })).toThrow(/fixturePackVersion/i);
   });
 });

@@ -15,7 +15,8 @@
     "test:guardrails": "pnpm --filter @nolen/server test:guardrails",
     "check:evidence": "node scripts/check-evidence.mjs",
     "test:evidence": "node --test scripts/check-evidence.test.mjs",
-    "db:migrate": "pnpm --filter @nolen/server db:migrate"
+    "db:migrate": "pnpm --filter @nolen/server db:migrate",
+    "db:seed": "pnpm --filter @nolen/server db:seed"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",

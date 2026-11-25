@@ -35,7 +35,11 @@ export class LocalPanZoomAdapter implements ProviderAdapter {
       providerJobId,
       state: 'SUCCEEDED',
       provenance: 'REPLAY_FIXTURE',
-      mediaUrl: 'https://storage.googleapis.com/nolen-fixtures/local-pan-zoom-mock.mp4',
+      locator: {
+        kind: 'REPLAY_FIXTURE',
+        packVersion: 'v1',
+        fixtureId: 'default-local_pan_zoom-video-9-16',
+      },
       rawResponse: { filter: 'zoompan', fps: 30 },
     };
   }

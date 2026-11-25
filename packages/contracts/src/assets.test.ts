@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetDtoSchema, reviewAssetSchema, shotAssetSelectionDtoSchema } from './assets.js';
+import { assetDtoSchema, reviewAssetSchema, selectShotAssetSchema, shotAssetSelectionDtoSchema, shotAttemptDtoSchema } from './assets.js';
 
 describe('Asset Contracts', () => {
   it('validates a correct asset DTO', () => {
@@ -85,5 +85,64 @@ describe('Asset Contracts', () => {
       },
     };
     expect(shotAssetSelectionDtoSchema.parse(selection)).toMatchObject(selection);
+  });
+
+  it('validates selectShotAssetSchema and rejects non-uuid or invalid kind', () => {
+    const valid = {
+      assetId: crypto.randomUUID(),
+      kind: 'VIDEO',
+    };
+    expect(selectShotAssetSchema.parse(valid)).toMatchObject(valid);
+
+    expect(() => selectShotAssetSchema.parse({
+      assetId: 'not-a-uuid',
+      kind: 'VIDEO',
+    })).toThrow();
+
+    expect(() => selectShotAssetSchema.parse({
+      assetId: crypto.randomUUID(),
+      kind: 'AUDIO',
+    })).toThrow();
+  });
+
+  it('validates shotAttemptDtoSchema across all DB attempt states including SUBMITTED and SUBMISSION_UNCERTAIN', () => {
+    const validStates = [
+      'QUEUED',
+      'SUBMITTED',
+      'SUBMISSION_UNCERTAIN',
+      'RUNNING',
+      'SUCCEEDED',
+      'FAILED',
+      'CANCELED',
+    ] as const;
+
+    for (const state of validStates) {
+      const valid = {
+        id: crypto.randomUUID(),
+        filmId: crypto.randomUUID(),
+        storyRevisionId: crypto.randomUUID(),
+        shotRevisionId: crypto.randomUUID(),
+        kind: 'VIDEO',
+        state,
+        executionMode: 'REPLAY',
+        provider: 'RUNWAY',
+        assetId: crypto.randomUUID(),
+        latestReviewDecision: 'APPROVED',
+        isSelected: true,
+        createdAt: new Date().toISOString(),
+      };
+      expect(shotAttemptDtoSchema.parse(valid)).toMatchObject(valid);
+    }
+
+    expect(() => shotAttemptDtoSchema.parse({
+      id: crypto.randomUUID(),
+      filmId: crypto.randomUUID(),
+      storyRevisionId: null,
+      shotRevisionId: null,
+      kind: 'VIDEO',
+      state: 'UNKNOWN_STATE',
+      executionMode: 'REPLAY',
+      createdAt: new Date().toISOString(),
+    })).toThrow();
   });
 });

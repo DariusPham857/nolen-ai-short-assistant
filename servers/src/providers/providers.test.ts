@@ -39,7 +39,12 @@ describe('Provider Adapters (PD-02 / BLOCK 3)', () => {
     const status = await adapter.pollStatus(result.providerJobId);
     expect(status.state).toBe('SUCCEEDED');
     expect(status.provenance).toBe('REPLAY_FIXTURE');
-    expect(status.mediaUrl).toContain('gemini-mock-keyframe.png');
+    expect(status.mediaUrl).toBeUndefined();
+    expect(status.locator).toEqual({
+      kind: 'REPLAY_FIXTURE',
+      packVersion: 'v1',
+      fixtureId: 'default-gemini-image-9-16',
+    });
 
     const reconciliation = await adapter.reconcile(baseImageRequest.attemptId, result.providerJobId);
     expect(reconciliation.outcome).toBe('CONFIRMED_SUCCEEDED');
@@ -60,7 +65,12 @@ describe('Provider Adapters (PD-02 / BLOCK 3)', () => {
     const status = await adapter.pollStatus(result.providerJobId);
     expect(status.state).toBe('SUCCEEDED');
     expect(status.provenance).toBe('REPLAY_FIXTURE');
-    expect(status.mediaUrl).toContain('runway-mock-video.mp4');
+    expect(status.mediaUrl).toBeUndefined();
+    expect(status.locator).toEqual({
+      kind: 'REPLAY_FIXTURE',
+      packVersion: 'v1',
+      fixtureId: 'default-runway-video-9-16',
+    });
   });
 
   it('submits and polls Fake fal.ai Kling adapter with REPLAY provenance', async () => {
@@ -75,7 +85,12 @@ describe('Provider Adapters (PD-02 / BLOCK 3)', () => {
     const status = await adapter.pollStatus(result.providerJobId);
     expect(status.state).toBe('SUCCEEDED');
     expect(status.provenance).toBe('REPLAY_FIXTURE');
-    expect(status.mediaUrl).toContain('fal-kling-mock-video.mp4');
+    expect(status.mediaUrl).toBeUndefined();
+    expect(status.locator).toEqual({
+      kind: 'REPLAY_FIXTURE',
+      packVersion: 'v1',
+      fixtureId: 'default-fal_kling-video-9-16',
+    });
   });
 
   it('handles LocalPanZoom adapter deterministically with REPLAY provenance', async () => {
@@ -90,6 +105,12 @@ describe('Provider Adapters (PD-02 / BLOCK 3)', () => {
     const status = await adapter.pollStatus(result.providerJobId);
     expect(status.state).toBe('SUCCEEDED');
     expect(status.provenance).toBe('REPLAY_FIXTURE');
+    expect(status.mediaUrl).toBeUndefined();
+    expect(status.locator).toEqual({
+      kind: 'REPLAY_FIXTURE',
+      packVersion: 'v1',
+      fixtureId: 'default-local_pan_zoom-video-9-16',
+    });
   });
 
   it('fails closed when attempting to request LIVE mode from fake adapters', async () => {

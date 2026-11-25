@@ -1,16 +1,13 @@
 import { z } from 'zod';
-import { attemptKindSchema } from './financial.js';
+import { attemptKindSchema, executionModeSchema, fixturePackVersionSchema, fixtureIdSchema } from './financial.js';
+
+export { executionModeSchema, fixturePackVersionSchema, fixtureIdSchema };
 
 export const providerKindSchema = z.enum([
   'GEMINI',
   'RUNWAY',
   'FAL_KLING',
   'LOCAL_PAN_ZOOM',
-]);
-
-export const executionModeSchema = z.enum([
-  'LIVE',
-  'REPLAY',
 ]);
 
 export const provenanceSchema = z.enum([
@@ -31,6 +28,18 @@ export const dispatchStateSchema = z.enum([
   'EXHAUSTED',
 ]);
 
+export const assetLocatorSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('REPLAY_FIXTURE'),
+    packVersion: fixturePackVersionSchema,
+    fixtureId: fixtureIdSchema,
+  }),
+  z.object({
+    kind: z.literal('REMOTE_URL'),
+    url: z.string().url(),
+  }),
+]);
+
 export const generationRequestSchema = z.object({
   attemptId: z.string().uuid(),
   filmId: z.string().uuid(),
@@ -44,6 +53,9 @@ export const generationRequestSchema = z.object({
   keyframeAssetId: z.string().uuid().optional(),
   keyframeUrl: z.string().url().optional(),
   durationSeconds: z.number().int().min(1).max(60).optional(),
+  fixturePackVersion: fixturePackVersionSchema.optional(),
+  fixtureId: fixtureIdSchema.optional(),
+  requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict();
 
 export const submissionResultSchema = z.object({
@@ -63,7 +75,33 @@ export const providerStatusUpdateSchema = z.object({
   mediaUrl: z.string().url().optional(),
   errorMessage: z.string().max(2000).optional(),
   rawResponse: z.unknown().optional(),
-}).strict();
+  locator: assetLocatorSchema.optional(),
+}).strict().superRefine((data, ctx) => {
+  if (data.provenance === 'REPLAY_FIXTURE') {
+    if (data.mediaUrl !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'REPLAY_FIXTURE must not have mediaUrl (remote URL forbidden in REPLAY mode)',
+        path: ['mediaUrl'],
+      });
+    }
+    if (!data.locator || data.locator.kind !== 'REPLAY_FIXTURE') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'REPLAY_FIXTURE provenance requires a valid REPLAY_FIXTURE locator',
+        path: ['locator'],
+      });
+    }
+  } else if (data.provenance === 'LIVE_PROVIDER') {
+    if (data.locator && data.locator.kind !== 'REMOTE_URL') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'LIVE_PROVIDER provenance requires REMOTE_URL locator',
+        path: ['locator'],
+      });
+    }
+  }
+});
 
 export const reconciliationResultSchema = z.object({
   attemptId: z.string().uuid(),
@@ -86,3 +124,4 @@ export type GenerationRequest = z.infer<typeof generationRequestSchema>;
 export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 export type ProviderStatusUpdate = z.infer<typeof providerStatusUpdateSchema>;
 export type ReconciliationResult = z.infer<typeof reconciliationResultSchema>;
+export type AssetLocator = z.infer<typeof assetLocatorSchema>;

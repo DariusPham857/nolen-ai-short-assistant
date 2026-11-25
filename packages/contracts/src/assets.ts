@@ -43,6 +43,29 @@ export const shotAssetSelectionDtoSchema = z.object({
   asset: assetDtoSchema,
 });
 
+export const selectShotAssetSchema = z.object({
+  assetId: z.string().uuid(),
+  kind: assetKindSchema,
+  expectedStateVersion: z.number().int().nonnegative().optional(),
+});
+
+export const shotAttemptDtoSchema = z.object({
+  id: z.string().uuid(),
+  filmId: z.string().uuid(),
+  storyRevisionId: z.string().uuid().nullable(),
+  shotRevisionId: z.string().uuid().nullable(),
+  kind: z.enum(['IMAGE', 'VIDEO', 'TTS', 'ASSEMBLY']),
+  state: z.enum(['QUEUED', 'SUBMITTED', 'SUBMISSION_UNCERTAIN', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED']),
+  executionMode: z.enum(['LIVE', 'REPLAY']),
+  provider: z.string().optional(),
+  assetId: z.string().uuid().nullable().optional(),
+  latestReviewDecision: assetReviewDecisionSchema.nullable().optional(),
+  isSelected: z.boolean().optional(),
+  createdAt: z.string().datetime(),
+});
+
 export type AssetDto = z.infer<typeof assetDtoSchema>;
 export type ReviewAsset = z.infer<typeof reviewAssetSchema>;
 export type ShotAssetSelectionDto = z.infer<typeof shotAssetSelectionDtoSchema>;
+export type SelectShotAsset = z.infer<typeof selectShotAssetSchema>;
+export type ShotAttemptDto = z.infer<typeof shotAttemptDtoSchema>;

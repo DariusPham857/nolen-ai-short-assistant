@@ -1,0 +1,45 @@
+{
+  "version": "v1",
+  "fixtures": [
+    {
+      "fixtureId": "default-gemini-image-9-16",
+      "provider": "GEMINI",
+      "kind": "IMAGE",
+      "aspectRatio": "9:16",
+      "relPath": "images/default-gemini-image-9-16.png",
+      "mimeType": "image/png",
+      "sha256": "c15f7bd80a3f700d3c4d30625cd607d4c4616b1954caca83c496b4019f97d4b0",
+      "byteSize": 5877
+    },
+    {
+      "fixtureId": "default-runway-video-9-16",
+      "provider": "RUNWAY",
+      "kind": "VIDEO",
+      "aspectRatio": "9:16",
+      "relPath": "videos/default-runway-video-9-16.mp4",
+      "mimeType": "video/mp4",
+      "sha256": "b6d53a58c2e6499642e673fdd2b4b79fb59366dd68ea2f6bc04fe03972a31cfe",
+      "byteSize": 17202
+    },
+    {
+      "fixtureId": "default-fal_kling-video-9-16",
+      "provider": "FAL_KLING",
+      "kind": "VIDEO",
+      "aspectRatio": "9:16",
+      "relPath": "videos/default-fal_kling-video-9-16.mp4",
+      "mimeType": "video/mp4",
+      "sha256": "b6d53a58c2e6499642e673fdd2b4b79fb59366dd68ea2f6bc04fe03972a31cfe",
+      "byteSize": 17202
+    },
+    {
+      "fixtureId": "default-local_pan_zoom-video-9-16",
+      "provider": "LOCAL_PAN_ZOOM",
+      "kind": "VIDEO",
+      "aspectRatio": "9:16",
+      "relPath": "videos/default-local_pan_zoom-video-9-16.mp4",
+      "mimeType": "video/mp4",
+      "sha256": "b6d53a58c2e6499642e673fdd2b4b79fb59366dd68ea2f6bc04fe03972a31cfe",
+      "byteSize": 17202
+    }
+  ]
+}
