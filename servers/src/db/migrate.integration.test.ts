@@ -22,14 +22,14 @@ it('migrates fresh database and accepts a complete valid journal repeatedly', as
   await withDatabase(async (url, client) => {
     await migrateDatabase(url);
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
     expect(await client`SELECT * FROM films`).toHaveLength(0);
   });
 });
 
 it('FI append-only trigger/function drift blocks migration before repair',async()=>{
   for(const mutation of ['ALTER TABLE cost_ledger_events DISABLE TRIGGER fi_cost_ledger_events_append_only','DROP TRIGGER fi_budget_limit_events_append_only ON budget_limit_events',"CREATE OR REPLACE FUNCTION fi_guard_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"]){
-    await withDatabase(async(url,client)=>{await migrateDatabase(url);await client.unsafe(mutation);await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);});
+    await withDatabase(async(url,client)=>{await migrateDatabase(url);await client.unsafe(mutation);await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);});
   }
 });
 
@@ -38,7 +38,7 @@ it('SP guard trigger/function drift blocks migration before any repair',async()=
     await withDatabase(async(url,client)=>{
       await migrateDatabase(url);await client.unsafe(mutation);
       await expect(migrateDatabase(url)).rejects.toThrow('SCHEMA_MISMATCH');
-      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+      expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
     });
   }
 });
@@ -83,7 +83,7 @@ it('upgrades FI state-3 to state-4 without data loss and rejects incompatible pe
     await client`INSERT INTO film_budget_accounts(film_id,operator_id,budget_limit_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros) VALUES(${id},'local-operator',100,40,20)`;
     await migrateDatabase(url);
     expect((await client`SELECT budget_limit_usd_micros,reserved_open_usd_micros,pending_liability_usd_micros FROM film_budget_accounts WHERE film_id=${id}`)[0]).toMatchObject({budget_limit_usd_micros:'100',reserved_open_usd_micros:'40',pending_liability_usd_micros:'20'});
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
   });
   await withDatabase(async(url,client)=>{
     await migrateDatabase(url,folder);const id=randomUUID();
@@ -109,7 +109,7 @@ it('upgrades state-4 to state-5 (KF-001) creating asset tables and preserving ex
     await client`INSERT INTO films(id,title,brief,budget_limit_usd_micros,operator_id,idempotency_key,request_hash) VALUES(${id},'State-4 Film','Upgrade test',5000000,'local-operator',${randomUUID()},'state-4')`;
     await client`INSERT INTO film_budget_accounts(film_id,operator_id,budget_limit_usd_micros) VALUES(${id},'local-operator',5000000)`;
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
     expect((await client`SELECT to_regclass('public.assets') AS name`)[0].name).not.toBeNull();
     expect((await client`SELECT to_regclass('public.asset_reviews') AS name`)[0].name).not.toBeNull();
     expect((await client`SELECT to_regclass('public.shot_asset_selections') AS name`)[0].name).not.toBeNull();
@@ -149,7 +149,7 @@ it('upgrades state-5 to state-6 (PD-001) adding EXHAUSTED state to dispatch_outb
 
     // Apply 0005 migration
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
 
     const [outbox] = await client<{ status: string; retry_count: number; exhausted_at: unknown }[]>`
       SELECT status, retry_count, exhausted_at FROM dispatch_outbox WHERE id = ${outboxId}
@@ -193,7 +193,7 @@ it('upgrades state-6 to state-7 (PD-05a.2) adding execution_mode to attempts and
 
     // Apply 0006 migration
     await migrateDatabase(url);
-    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
 
     // Existing attempts row with reservation > 0 is backfilled as 'LIVE' to preserve financial semantics
     const [att] = await client<{ execution_mode: string }[]>`SELECT execution_mode FROM attempts WHERE id = ${attemptId}`;
@@ -212,6 +212,39 @@ it('upgrades state-6 to state-7 (PD-05a.2) adding execution_mode to attempts and
       VALUES(${attemptId}, 'SUCCEEDED', ${claimToken})`;
     const [disp] = await client<{ state: string }[]>`SELECT state FROM outbound_dispatches WHERE attempt_id = ${attemptId}`;
     expect(disp.state).toBe('SUCCEEDED');
+  });
+});
+
+it('upgrades state-7 to state-8 (GI-001) creating film_reference_assets with FK and dimension checks', async () => {
+  const folder = mkdtempSync(path.join(tmpdir(), 'state-7-'));
+  cpSync(migrationFolder, folder, { recursive: true });
+  const journalFile = path.join(folder, 'meta/_journal.json');
+  const journal = JSON.parse(readFileSync(journalFile, 'utf8')) as { entries: unknown[] };
+  journal.entries = journal.entries.slice(0, 7);
+  writeFileSync(journalFile, JSON.stringify(journal));
+  await withDatabase(async (url, client) => {
+    await migrateDatabase(url, folder);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(7);
+    expect((await client`SELECT to_regclass('public.film_reference_assets') AS name`)[0].name).toBeNull();
+
+    const filmId = randomUUID();
+    await client`INSERT INTO films(id, title, brief, budget_limit_usd_micros, operator_id, idempotency_key, request_hash)
+      VALUES(${filmId}, 'State-7 Film', 'Upgrade test', 5000000, 'local-operator', ${randomUUID()}, 'state-7')`;
+
+    await migrateDatabase(url);
+    expect(await client`SELECT * FROM drizzle.__drizzle_migrations`).toHaveLength(8);
+    expect((await client`SELECT to_regclass('public.film_reference_assets') AS name`)[0].name).not.toBeNull();
+
+    // Dimension check blocks < 300px and > 16.7 MP
+    await expect(client`
+      INSERT INTO film_reference_assets(id, film_id, storage_path, sha256_hash, mime_type, byte_size, width, height, label, source_note, rights_confirmed_by)
+      VALUES(${randomUUID()}, ${filmId}, 'references/abc.png', ${'a'.repeat(64)}, 'image/png', 1024, 299, 300, 'Too small', 'test', 'local-operator')
+    `).rejects.toThrow();
+
+    await expect(client`
+      INSERT INTO film_reference_assets(id, film_id, storage_path, sha256_hash, mime_type, byte_size, width, height, label, source_note, rights_confirmed_by)
+      VALUES(${randomUUID()}, ${filmId}, 'references/abc.png', ${'b'.repeat(64)}, 'image/png', 1024, 4096, 4097, 'Too big', 'test', 'local-operator')
+    `).rejects.toThrow();
   });
 });
 

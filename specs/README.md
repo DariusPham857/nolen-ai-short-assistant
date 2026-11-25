@@ -10,5 +10,6 @@ Source: [ENG-DEC-001](../docs/development/ENG-DEC-001.md).
 - [Keyframe Approval Gate & Asset Lifecycle](keyframe-approval/spec.md) and [implementation tasks](keyframe-approval/tasks.md)
 - [Provider Dispatch & Financial Settlement](provider-dispatch/spec.md) and [implementation tasks](provider-dispatch/tasks.md)
 - [Shot Video Generation & Review Workstation](shot-review/spec.md) and [implementation tasks](shot-review/tasks.md)
+- [Generation Input Contract, Preview & Reference Library](generation-inputs/spec.md) and [implementation tasks](generation-inputs/tasks.md)
 
 Commands and gate limitations: [verification](../docs/development/verification.md).

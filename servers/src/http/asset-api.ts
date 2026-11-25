@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { reviewAssetSchema, selectShotAssetSchema } from '@nolen/contracts';
 import { getAssetMedia, getShotAssets, getShotAttempts, reviewAsset, selectShotAsset } from '../assets/repository.js';
+import { getReferenceAssetMedia, listReferenceAssets, uploadReferenceAsset } from '../assets/reference-repository.js';
 import { ApiFailure } from './errors.js';
-import { boundedJson, installBoundary, requireOperator, resourceId } from './boundary.js';
+import { boundedJson, boundedMultipart, installBoundary, requireOperator, resourceId } from './boundary.js';
 
 export function createAssetApi() {
   const api = new Hono();
@@ -56,12 +57,46 @@ export function createAssetApi() {
     });
   });
 
+  api.get('/api/films/:filmId/reference-assets', async c => {
+    const filmId = resourceId(c.req.param('filmId'));
+    const operatorId = await requireOperator(c);
+    return c.json(await listReferenceAssets(filmId, operatorId));
+  });
+
+  api.post('/api/films/:filmId/reference-assets', async c => {
+    const filmId = resourceId(c.req.param('filmId'));
+    const operatorId = await requireOperator(c);
+    const parsedUpload = await boundedMultipart(c.req.raw);
+    const created = await uploadReferenceAsset(filmId, operatorId, parsedUpload);
+    return c.json(created, 201);
+  });
+
+  api.get('/api/films/:filmId/reference-assets/:assetId/media', async c => {
+    const filmId = resourceId(c.req.param('filmId'));
+    const assetId = resourceId(c.req.param('assetId'));
+    const operatorId = await requireOperator(c);
+    const { buffer, mimeType, byteSize, sha256 } = await getReferenceAssetMedia(filmId, assetId, operatorId);
+    return new Response(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type': mimeType,
+        'Content-Length': byteSize,
+        'ETag': `"${sha256}"`,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': 'inline',
+      },
+    });
+  });
+
   for (const [route, allow] of [
     ['/api/films/:filmId/shots/:shotId/assets', 'GET'],
     ['/api/films/:filmId/shots/:shotId/attempts', 'GET'],
     ['/api/films/:filmId/shots/:shotId/selections', 'POST'],
     ['/api/assets/:assetId/review', 'POST'],
     ['/api/assets/:assetId/media', 'GET'],
+    ['/api/films/:filmId/reference-assets', 'GET, POST'],
+    ['/api/films/:filmId/reference-assets/:assetId/media', 'GET'],
   ] as const) {
     api.all(route, c => {
       c.header('Allow', allow);

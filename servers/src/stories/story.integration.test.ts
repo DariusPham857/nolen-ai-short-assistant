@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { canonicalStory, normalizeFilm, type Expected, type StoryContent, type Storyboard, type StorySnapshot } from '@nolen/contracts';
+import { canonicalStoryV1, type StoryContentV1, normalizeFilm, type Expected, type StoryContent, type Storyboard, type StorySnapshot } from '@nolen/contracts';
 import { createStoryApi } from '../http/story-api.js';
 import { createFilm } from '../films/repository.js';
 import { pgClient } from '../db/index.js';
@@ -15,12 +15,15 @@ function request(film:string,route:string,body?:unknown,key:string|null=randomUU
   return api.request(`http://127.0.0.1:3000/api/films/${film}/${route}`,{method:body===undefined?'GET':'POST',headers:{Cookie:cookie,Origin:'http://127.0.0.1:3000','Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
 }
 /** Clone active content into the explicit successor input, retaining optimistic Shot tokens. */
+function successorV1(r:StorySnapshot):StoryContentV1 {
+  const c=structuredClone(r.content) as StoryContentV1;for(const s of c.scenes.flatMap(s=>s.shots))s.expectedShotRevisionId=r.shotRevisions[s.id!].id;return c;
+}
 function successor(r:StorySnapshot):StoryContent {
   const c=structuredClone(r.content);for(const s of c.scenes.flatMap(s=>s.shots))s.expectedShotRevisionId=r.shotRevisions[s.id!].id;return c;
 }
 const expected=(r:StorySnapshot):Expected=>({expectedStoryRevisionId:r.id,expectedStateVersion:r.stateVersion});
 async function read(id:string,revision?:string):Promise<Storyboard>{return await (await request(id,revision?`storyboard/revisions/${revision}`:'storyboard')).json() as Storyboard;}
-async function setup(content=canonicalStory()){
+async function setup(content:StoryContent=canonicalStoryV1()){
   const key=randomUUID();const film=await createFilm(input,key,'local-operator');
   expect((await request(film.id,'storyboard/revisions',{expectedStoryRevisionId:null,expectedStateVersion:0,content})).status).toBe(201);
   return {film,key,r:(await read(film.id)).active!};
@@ -53,7 +56,7 @@ it('canonical create/reload/approve, durable Film create receipt, approval evide
 });
 
 it('20 same-key requests replay one revision; 20 distinct keys on same expected version have one winner',async()=>{
-  const film=await createFilm(input,randomUUID(),'local-operator');const key=randomUUID();const body={expectedStoryRevisionId:null,expectedStateVersion:0,content:canonicalStory()};
+  const film=await createFilm(input,randomUUID(),'local-operator');const key=randomUUID();const body={expectedStoryRevisionId:null,expectedStateVersion:0,content:canonicalStoryV1()};
   const results=await Promise.all(Array.from({length:20},()=>request(film.id,'storyboard/revisions',body,key)));
   expect(results.map(r=>r.status)).toEqual(Array(20).fill(201));
   const receipts=await Promise.all(results.map(async r=>hash(await r.json())));expect(new Set(receipts).size).toBe(1);
@@ -77,7 +80,7 @@ it('Bible identity edit creates affected ShotRevisions and new validation; reord
 });
 
 it('waiver is dependency-bound, append-only, cannot alter approved evidence; approve/waiver race is serialized',async()=>{
-  const c=canonicalStory();c.storyBible.wardrobes.push({id:'shirt',name:'Shirt',description:'White'});c.scenes[0].shots[1].spec.continuity.start.characterStates[0].wardrobeId='shirt';
+  const c=canonicalStoryV1();c.storyBible.wardrobes.push({id:'shirt',name:'Shirt',description:'White'});c.scenes[0].shots[1].spec.continuity.start.characterStates[0].wardrobeId='shirt';
   const {film,r}=await setup(c);let current=await transition(film.id,r,'mark-planned');current=await transition(film.id,current,'submit-review');
   let board=await read(film.id);const finding=board.validation!.findings.find(f=>f.waivable)!;
   expect((await request(film.id,'storyboard/approve',expected(current))).status).toBe(422);
@@ -115,7 +118,7 @@ it('Story API enforces Host/Origin/auth/ownership/media/size and safe errors; fi
   expect((await request(film.id,'storyboard',undefined,null,{Cookie:`nolen_session=${expired}`})).status).toBe(401);
   const foreign=await createFilm(input,randomUUID(),'other-operator');expect((await request(foreign.id,'storyboard')).status).toBe(404);
   expect((await request('invalid-id','storyboard')).status).toBe(400);
-  expect((await request(film.id,'storyboard/revisions',{...expected(r),content:canonicalStory()},null)).status).toBe(400);
+  expect((await request(film.id,'storyboard/revisions',{...expected(r),content:canonicalStoryV1()},null)).status).toBe(400);
   expect((await request(film.id,'continuity/validate',expected(r),null,{'Content-Type':'text/plain'})).status).toBe(415);
   expect((await request(film.id,'continuity/validate',{x:'x'.repeat(524289)},null)).status).toBe(413);
   await pgClient`ALTER TABLE operator_sessions RENAME TO operator_sessions_unavailable`;
@@ -131,10 +134,10 @@ it('foreign ShotRevision membership is rejected by FK; invalid references and bl
   const c=successor(first.r);c.scenes[0].shots[0].spec.locationId='foreign';
   expect((await request(first.film.id,'storyboard/revisions',{...expected(first.r),content:c})).status).toBe(422);
   expect((await read(first.film.id)).history).toHaveLength(1);
-  const mismatch=successor(first.r);mismatch.storyBible.locations.push({id:'street',name:'Street',description:'Outdoor street'});mismatch.scenes[0].shots[0].spec.locationId='street';
+  const mismatch=successorV1(first.r);mismatch.storyBible.locations.push({id:'street',name:'Street',description:'Outdoor street'});mismatch.scenes[0].shots[0].spec.locationId='street';
   expect((await request(first.film.id,'storyboard/revisions',{...expected(first.r),content:mismatch})).status).toBe(422);
   expect((await read(first.film.id)).history).toHaveLength(1);
-  const long=canonicalStory();long.scenes[0].shots[0].spec.durationSeconds=60;
+  const long=canonicalStoryV1();long.scenes[0].shots[0].spec.durationSeconds=60;
   const invalid=await setup(long);let r=await transition(invalid.film.id,invalid.r,'mark-planned');r=await transition(invalid.film.id,r,'submit-review');
   expect((await request(invalid.film.id,'storyboard/approve',expected(r))).status).toBe(422);
 });
@@ -145,7 +148,7 @@ it('duplicate gets a new stable Shot ID; removal preserves history; identity loc
   expect((await request(film.id,'storyboard/revisions',{...expected(r),content:c})).status).toBe(201);
   let current=(await read(film.id)).active!;const copy=current.content.scenes[0].shots[8];
   expect(Object.keys(r.shotRevisions)).not.toContain(copy.id);
-  const removed=successor(current);removed.scenes[0].shots.shift();removed.storyBible.styleRefs.push({id:'alternate',name:'Alternate',description:'Different visual identity'});removed.scenes[0].shots[0].spec.styleRefId='alternate';
+  const removed=successorV1(current);removed.scenes[0].shots.shift();removed.storyBible.styleRefs.push({id:'alternate',name:'Alternate',description:'Different visual identity'});removed.scenes[0].shots[0].spec.styleRefId='alternate';
   expect((await request(film.id,'storyboard/revisions',{...expected(current),content:removed})).status).toBe(201);
   current=(await read(film.id)).active!;expect(current.shotRevisions[original.id!]).toBeUndefined();expect((await read(film.id,r.id)).revision?.shotRevisions[original.id!]).toBeDefined();
   current=await transition(film.id,current,'mark-planned');current=await transition(film.id,current,'submit-review');
@@ -154,7 +157,7 @@ it('duplicate gets a new stable Shot ID; removal preserves history; identity loc
 });
 
 it('preserves approval-linked v1 evidence, validates legacy content separately under v2, and requires a v2 successor',async()=>{
-  const {film,r}=await setup();const legacyId=randomUUID();const legacyValidationId=randomUUID();const legacyContent=structuredClone(r.content);
+  const {film,r}=await setup();const legacyId=randomUUID();const legacyValidationId=randomUUID();const legacyContent=structuredClone(r.content) as StoryContentV1;
   legacyContent.storyBible.locations.push({id:'street',name:'Street',description:'Outdoor street'});legacyContent.scenes[0].shots[0].spec.locationId='street';
   const legacyShotRevisions=structuredClone(r.shotRevisions);for(const shot of Object.values(legacyShotRevisions))shot.policy.ruleSetVersion='story-approval-1';
   const legacyStored={content:legacyContent,shotRevisions:legacyShotRevisions};const legacyContentHash=hash(legacyStored);

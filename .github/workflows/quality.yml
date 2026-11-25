@@ -30,6 +30,11 @@ jobs:
           version: 11.21.0
           run_install: false
       - run: pnpm install --frozen-lockfile
+      - name: Install and verify FFmpeg/FFprobe on runner
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
       - name: QG-CODE build (no operator secret)
         run: pnpm build
       - run: pnpm lint
@@ -70,6 +75,9 @@ jobs:
       - name: Verify published port and worker independence
         run: |
           COMPOSE_PROJECT_NAME=fc001-ci node scripts/compose-smoke.mjs
+      - name: Exact production-image media validation (test:media)
+        run: |
+          docker compose -p fc001-ci exec -T web pnpm --filter @nolen/server test:media
       - name: Logs
         if: failure()
         run: docker compose -p fc001-ci logs --tail 80

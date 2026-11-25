@@ -21,6 +21,7 @@ import { getEnv } from "../config/env.js";
 export type AssetCategory =
   | "keyframes"
   | "videos"
+  | "references"
   | "audio"
   | "exports"
   | "temp";
@@ -32,12 +33,18 @@ export class StorageAdapter {
     this.basePath = basePath ?? getEnv().STORAGE_BASE_PATH;
   }
 
-  /** Resolve a path within a category directory with OWASP path containment check. */
-  resolve(category: AssetCategory, filename: string): string {
+  /** Resolve and ensure the root directory for an asset category exists. */
+  resolveDir(category: AssetCategory): string {
     const dir = path.resolve(this.basePath, category);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
+    return dir;
+  }
+
+  /** Resolve a path within a category directory with OWASP path containment check. */
+  resolve(category: AssetCategory, filename: string): string {
+    const dir = this.resolveDir(category);
     const target = path.resolve(dir, filename);
     const rel = path.relative(dir, target);
     if (rel.startsWith('..') || path.isAbsolute(rel)) {

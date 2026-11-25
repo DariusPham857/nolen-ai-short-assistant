@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import PgBoss from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { canonicalStoryV2 } from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { admitAttempt } from '../financial/repository.js';
+import { previewAndAdmitMediaAttempt } from '../test-helpers/media-admission.js';
 import { startWorker, type WorkerOptions } from './index.js';
 import { WorkerLoopRunner } from './shutdown.js';
 import { relayOne, type BossContract } from '../financial/outbox.js';
@@ -50,9 +52,11 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       await tx`INSERT INTO budget_limit_events(id, film_id, actor_id, prior_limit_usd_micros, new_limit_usd_micros, reason)
         VALUES(${randomUUID()}, ${filmId}, 'local-operator', ${budget}, ${budget}, 'test baseline')`;
 
-      // 2. Story Revision (Approved)
+      // 2. Story Revision (Approved) with valid StoryContent v2 + ShotSpec v2
+      const storyContent = canonicalStoryV2();
+      const shotSpec = storyContent.scenes[0].shots[0].spec;
       await tx`INSERT INTO story_revisions(id, film_id, revision_no, state, content, content_hash)
-        VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', '{"title":"Worker Test"}'::jsonb, 'fixture-hash')`;
+        VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', ${JSON.stringify({ content: storyContent })}::jsonb, 'fixture-hash')`;
       await tx`UPDATE films SET active_story_revision_id=${storyRevisionId}, status='PLANNING' WHERE id=${filmId}`;
 
       await tx`INSERT INTO story_validations(id, story_revision_id, context, dependency_hash, rule_set_version, findings)
@@ -78,7 +82,7 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
 
       await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${filmId})`;
       await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
-        VALUES(${shotRevisionId}, ${filmId}, ${shotId}, '{"prompt":"Detective in the shadows"}'::jsonb, 'dep-hash-1', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+        VALUES(${shotRevisionId}, ${filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-1', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
       await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
         VALUES(${filmId}, ${storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
 
@@ -167,8 +171,8 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
     });
 
     try {
-      // 1. Admit 4 REPLAY attempts
-      const attImage = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+      // 1. Admit 4 REPLAY attempts (media via preview+admit, TTS/ASSEMBLY via v1 direct admit)
+      const { receipt: attImage } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
         storyRevisionId: s.storyRevisionId,
         shotRevisionId: s.shotRevisionId,
         kind: 'IMAGE',
@@ -177,12 +181,12 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
         executionMode: 'REPLAY',
       });
 
-      const attVideo = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+      const { receipt: attVideo } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
         storyRevisionId: s.storyRevisionId,
         shotRevisionId: s.shotRevisionId,
         kind: 'VIDEO',
         rateCardSnapshotId: s.runwayRateId,
-        pricingUnits: 1,
+        pricingUnits: 5,
         executionMode: 'REPLAY',
       });
 
@@ -278,8 +282,8 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
     });
 
     try {
-      // 1. Admit 3 LIVE attempts: IMAGE, TTS, ASSEMBLY
-      const liveImage = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+      // 1. Admit 3 LIVE attempts: IMAGE (v2 via preview), TTS (v1), ASSEMBLY (v1)
+      const { receipt: liveImage } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
         storyRevisionId: s.storyRevisionId,
         shotRevisionId: s.shotRevisionId,
         kind: 'IMAGE',
@@ -425,7 +429,7 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
     const s = await seedWorkerSetup();
 
     // Seed 2 REPLAY attempts while worker is offline
-    const att1 = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: att1 } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
@@ -434,12 +438,12 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       executionMode: 'REPLAY',
     });
 
-    const att2 = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
+    const { receipt: att2 } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
       storyRevisionId: s.storyRevisionId,
       shotRevisionId: s.shotRevisionId,
       kind: 'VIDEO',
       rateCardSnapshotId: s.runwayRateId,
-      pricingUnits: 1,
+      pricingUnits: 5,
       executionMode: 'REPLAY',
     });
 

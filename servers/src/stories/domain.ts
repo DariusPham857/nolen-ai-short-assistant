@@ -44,6 +44,16 @@ export function policy(spec:ShotSpec,content:StoryContent):Policy {
   return {systemRecommendation:recommendation,effectiveRequirement:spec.keyframeOverride?.requirement??recommendation,riskFlags:flags,ruleSetVersion:RULESET};
 }
 
+/** Normalize Bible definition for dependency hashing: omit empty referenceAssetIds so v1 hashes match v2 empty bindings. */
+function normalizeBindingDef(def: { id: string; name: string; description: string; hero?: boolean; referenceAssetIds?: string[] }) {
+  if (!def.referenceAssetIds || def.referenceAssetIds.length === 0) {
+    const rest = { ...def };
+    delete rest.referenceAssetIds;
+    return rest;
+  }
+  return { ...def, referenceAssetIds: [...new Set(def.referenceAssetIds)].sort() };
+}
+
 /** Resolve only referenced definitions so unrelated Bible edits can reuse unaffected ShotRevisions. */
 export function shotDependency(spec:ShotSpec,content:StoryContent):string {
   const states=[spec.continuity.start,spec.continuity.end];
@@ -51,7 +61,17 @@ export function shotDependency(spec:ShotSpec,content:StoryContent):string {
   const wardrobeIds=new Set(states.flatMap(s=>s.characterStates.map(c=>c.wardrobeId)));
   const propIds=new Set(states.flatMap(s=>[...s.propIds,...s.characterStates.flatMap(c=>c.heldPropIds)]));
   const locationIds=new Set([spec.locationId,...states.map(s=>s.locationId)]);const b=content.storyBible;
-  return hash({spec,bindings:{characters:b.characters.filter(x=>characterIds.has(x.id)),wardrobes:b.wardrobes.filter(x=>wardrobeIds.has(x.id)),props:b.props.filter(x=>propIds.has(x.id)),locations:b.locations.filter(x=>locationIds.has(x.id)),styleRefs:b.styleRefs.filter(x=>x.id===spec.styleRefId)},policy:policy(spec,content)});
+  return hash({
+    spec,
+    bindings:{
+      characters:b.characters.filter(x=>characterIds.has(x.id)).map(x=>normalizeBindingDef(x)),
+      wardrobes:b.wardrobes.filter(x=>wardrobeIds.has(x.id)).map(x=>normalizeBindingDef(x)),
+      props:b.props.filter(x=>propIds.has(x.id)).map(x=>normalizeBindingDef(x)),
+      locations:b.locations.filter(x=>locationIds.has(x.id)).map(x=>normalizeBindingDef(x)),
+      styleRefs:b.styleRefs.filter(x=>x.id===spec.styleRefId).map(x=>normalizeBindingDef(x)),
+    },
+    policy:policy(spec,content),
+  });
 }
 
 /** Deterministic STORY_APPROVAL checks across every adjacent shot, including scene boundaries. */

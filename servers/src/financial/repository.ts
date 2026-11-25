@@ -1,13 +1,26 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type postgres from 'postgres';
-import type { CreateAttempt, EstimateAttempt, ProviderKind, ReconcileAttempt, UpdateBudget } from '@nolen/contracts';
+import {
+  shotSpecSchema,
+  storyContentSchema,
+  type CreateAttempt,
+  type EstimateAttempt,
+  type GenerationPreviewRequest,
+  type GenerationPreviewResponse,
+  type GenerationRequestTemplateV2,
+  type ProviderKind,
+  type ReconcileAttempt,
+  type UpdateBudget,
+} from '@nolen/contracts';
 import { pgClient } from '../db/index.js';
 import { ApiFailure } from '../http/errors.js';
 import { RULESET } from '../stories/domain.js';
+import { verifyStoryBibleReferences } from '../assets/reference-repository.js';
+import { COMPILER_VERSION, compileGenerationTemplate, type ReferenceAssetLookup } from '../dispatch/compiler.js';
 import { storage, type AssetCategory } from '../lib/storage.js';
 import { add, assertAdmission, estimate, projection, subtract, type Projection, type Rate } from './domain.js';
-import { freezeGenerationRequestSnapshot, resolveDefaultFixture } from '../dispatch/service.js';
+import { computeRequestFingerprint, freezeGenerationRequestSnapshot, resolveDefaultFixture } from '../dispatch/service.js';
 
 type Tx = postgres.TransactionSql;
 type AccountRow = {
@@ -120,14 +133,45 @@ export async function changeBudget(filmId:string,operatorId:string,key:string,in
   });
 }
 
-/** One transaction creates Attempt, reservation journal, projection, receipt and dispatch intent. */
-export async function admitAttempt(filmId:string,operatorId:string,key:string,input:CreateAttempt):Promise<AttemptReceipt> {
-  const requestHash=digest(input);
-  return pgClient.begin('isolation level read committed',async tx=>{
-    const account=await ownedAccount(tx,filmId,operatorId,true);
-    const replay=await receipt<AttemptReceipt>(tx,filmId,operatorId,key,'ADMIT_ATTEMPT',requestHash);
-    if(replay)return replay;
-    const [story]=await tx<{id:string}[]>`SELECT sr.id FROM films f
+function resolveProviderKind(rawProviderName: string): ProviderKind {
+  const rawProvider = rawProviderName.toUpperCase().replace(/[-.]/g, '_');
+  if (rawProvider === 'GOOGLE' || rawProvider === 'GEMINI') return 'GEMINI';
+  if (rawProvider === 'RUNWAY') return 'RUNWAY';
+  if (rawProvider === 'FAL_AI' || rawProvider === 'FAL_KLING') return 'FAL_KLING';
+  if (rawProvider === 'LOCAL_PAN_ZOOM') return 'LOCAL_PAN_ZOOM';
+  throw new ApiFailure(422, 'UNSUPPORTED_PROVIDER', `Unsupported rate card provider: ${rawProviderName}`);
+}
+
+interface AuthoritativeMediaResolution {
+  template: GenerationRequestTemplateV2;
+  previewHash: string;
+  rate: RateRow;
+  provider: ProviderKind;
+}
+
+/**
+ * Shared authoritative resolver/compiler used by BOTH previewGeneration and admitAttempt
+ * for IMAGE and VIDEO attempts so preview hashes and admitted snapshots match byte-for-byte.
+ */
+async function resolveAuthoritativeMediaTemplate(
+  tx: Tx,
+  filmId: string,
+  operatorId: string,
+  input: {
+    storyRevisionId: string;
+    shotRevisionId: string | null;
+    kind: 'IMAGE' | 'VIDEO';
+    rateCardSnapshotId: string;
+    pricingUnits: number;
+    executionMode?: 'LIVE' | 'REPLAY';
+    fixturePackVersion?: string;
+    fixtureId?: string;
+  },
+  lockFilmRow: boolean,
+): Promise<AuthoritativeMediaResolution> {
+  const lockClause = lockFilmRow ? ' FOR UPDATE OF f' : '';
+  const stories = await tx.unsafe<{ id: string; content: unknown }[]>(
+    `SELECT sr.id, sr.content FROM films f
       JOIN story_revisions sr ON sr.id=f.active_story_revision_id AND sr.film_id=f.id
       JOIN story_approvals sa ON sa.story_revision_id=sr.id
       JOIN story_validations sv ON sv.story_revision_id=sr.id
@@ -135,82 +179,262 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
         AND sv.context='STORY_APPROVAL'
         AND sv.dependency_hash=sa.evidence->>'dependencyHash'
         AND sv.rule_set_version=sa.evidence->>'ruleSetVersion'
-      WHERE f.id=${filmId} AND f.operator_id=${operatorId} AND sr.id=${input.storyRevisionId} AND sr.state='APPROVED'
+      WHERE f.id=$1 AND f.operator_id=$2 AND sr.id=$3 AND sr.state='APPROVED'
         AND sa.evidence->>'storyRevisionId'=sr.id::text AND sa.evidence->>'contentHash'=sr.content_hash
-        AND sa.evidence->>'ruleSetVersion'=${RULESET}
-      FOR UPDATE OF f`;
-    if(!story)throw new ApiFailure(409,'CURRENT_APPROVAL_REQUIRED','Attempt requires the active StoryRevision with current approval evidence');
-    if(['IMAGE','VIDEO'].includes(input.kind) && !input.shotRevisionId)throw new ApiFailure(422,'SHOT_REVISION_REQUIRED','Image and video attempts require a ShotRevision');
-    let shotId: string | null = null;
-    if(input.shotRevisionId){
-      const [shot]=await tx<{id:string;shot_id:string}[]>`SELECT sr.id, m.shot_id FROM shot_revisions sr JOIN story_revision_shots m ON m.film_id=sr.film_id AND m.shot_revision_id=sr.id WHERE sr.id=${input.shotRevisionId} AND sr.film_id=${filmId} AND m.story_revision_id=${input.storyRevisionId}`;
-      if(!shot)throw new ApiFailure(422,'SHOT_REVISION_MISMATCH','ShotRevision is not part of the approved StoryRevision');
-      shotId = shot.shot_id;
+        AND sa.evidence->>'ruleSetVersion'=$4${lockClause}`,
+    [filmId, operatorId, input.storyRevisionId, RULESET],
+  );
+  const story = stories[0];
+  if (!story) {
+    throw new ApiFailure(409, 'CURRENT_APPROVAL_REQUIRED', 'Attempt requires the active StoryRevision with current approval evidence');
+  }
+  if (!input.shotRevisionId) {
+    throw new ApiFailure(422, 'SHOT_REVISION_REQUIRED', 'Image and video attempts require a ShotRevision');
+  }
+
+  const [shotRow] = await tx<{ id: string; shot_id: string; spec: unknown; dependency_hash: string }[]>`
+    SELECT sr.id, m.shot_id, sr.spec, sr.dependency_hash
+    FROM shot_revisions sr
+    JOIN story_revision_shots m ON m.film_id = sr.film_id AND m.shot_revision_id = sr.id
+    WHERE sr.id = ${input.shotRevisionId}
+      AND sr.film_id = ${filmId}
+      AND m.story_revision_id = ${input.storyRevisionId}
+  `;
+  if (!shotRow) {
+    throw new ApiFailure(422, 'SHOT_REVISION_MISMATCH', 'ShotRevision is not part of the approved StoryRevision');
+  }
+
+  const storedStory = story.content as { content?: unknown };
+  const parsedStory = storyContentSchema.safeParse(storedStory?.content ?? storedStory);
+  if (!parsedStory.success) {
+    throw new ApiFailure(422, 'INVALID_STORY_SNAPSHOT', 'Approved StoryRevision does not contain a valid StoryContent snapshot');
+  }
+  const parsedShot = shotSpecSchema.safeParse(shotRow.spec);
+  if (!parsedShot.success) {
+    throw new ApiFailure(422, 'INVALID_SHOT_SPEC', 'ShotRevision does not contain a valid ShotSpec');
+  }
+
+  const rate = await loadRate(tx, input.rateCardSnapshotId);
+  if (rate.operation !== input.kind) {
+    throw new ApiFailure(422, 'RATE_CARD_UNSUPPORTED', 'Rate card does not support this attempt kind');
+  }
+
+  const executionMode = input.executionMode ?? 'REPLAY';
+  const isReplay = executionMode === 'REPLAY';
+  if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
+    throw new ApiFailure(
+      422,
+      'UNVERIFIED_LIVE_RATE_CARD',
+      'Modeled rate cards are for REPLAY/development only and cannot be admitted for LIVE execution',
+    );
+  }
+
+  if (input.kind === 'VIDEO' && rate.rate_type === 'PER_SECOND' && input.pricingUnits !== parsedShot.data.durationSeconds) {
+    throw new ApiFailure(
+      422,
+      'PRICING_UNITS_DURATION_MISMATCH',
+      `VIDEO PER_SECOND pricingUnits (${input.pricingUnits}) must equal ShotRevision durationSeconds (${parsedShot.data.durationSeconds})`,
+    );
+  }
+
+  let selectedStartFrame: { assetId: string; sha256Hash: string; mimeType: string } | null = null;
+  if (input.kind === 'VIDEO') {
+    const [approvedKeyframe] = await tx<{ asset_id: string; storage_path: string; sha256_hash: string; mime_type: string }[]>`
+      SELECT s.asset_id, a.storage_path, a.sha256_hash, a.mime_type
+      FROM shot_asset_selections s
+      JOIN assets a ON a.id = s.asset_id
+        AND a.film_id = s.film_id
+        AND a.shot_revision_id = s.shot_revision_id
+        AND a.kind = s.kind
+      JOIN (
+        SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision
+        FROM asset_reviews r
+        WHERE r.film_id = ${filmId}
+        ORDER BY r.asset_id, r.created_at DESC, r.id DESC
+      ) lr ON lr.asset_id = s.asset_id
+      WHERE s.story_revision_id = ${input.storyRevisionId}
+        AND s.shot_id = ${shotRow.shot_id}
+        AND s.kind = 'IMAGE'
+        AND s.shot_revision_id = ${input.shotRevisionId}
+        AND a.film_id = ${filmId}
+        AND a.shot_revision_id = ${input.shotRevisionId}
+        AND a.kind = 'IMAGE'
+        AND a.verified = true
+        AND lr.decision = 'APPROVED'
+      LIMIT 1
+    `;
+    if (!approvedKeyframe) {
+      throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
     }
-    const rate=await loadRate(tx,input.rateCardSnapshotId);
-    if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');
+
+    const category: AssetCategory = approvedKeyframe.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
+    const filename = path.basename(approvedKeyframe.storage_path);
+    if (!storage.exists(category, filename)) {
+      throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset missing from storage');
+    }
+    const verifiedOnDisk = await storage.verify(category, filename, approvedKeyframe.sha256_hash).catch(() => false);
+    if (!verifiedOnDisk) {
+      throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset failed disk integrity check');
+    }
+    selectedStartFrame = {
+      assetId: approvedKeyframe.asset_id,
+      sha256Hash: approvedKeyframe.sha256_hash,
+      mimeType: approvedKeyframe.mime_type,
+    };
+  }
+
+  const refRows = await verifyStoryBibleReferences(tx, filmId, parsedStory.data.storyBible);
+  const referenceAssets = new Map<string, ReferenceAssetLookup>();
+  for (const [id, row] of refRows.entries()) {
+    referenceAssets.set(id, { id, sha256Hash: row.sha256_hash, mimeType: row.mime_type });
+  }
+
+  const provider = resolveProviderKind(rate.provider);
+  const defaultFixture = isReplay && !input.fixtureId
+    ? resolveDefaultFixture({ provider, kind: input.kind, aspectRatio: '9:16' })
+    : null;
+
+  const template = compileGenerationTemplate({
+    filmId,
+    storyRevisionId: input.storyRevisionId,
+    shotRevisionId: input.shotRevisionId,
+    shotDependencyHash: shotRow.dependency_hash,
+    kind: input.kind,
+    shotSpec: parsedShot.data,
+    storyBible: parsedStory.data.storyBible,
+    referenceAssets,
+    selectedStartFrame,
+    provider,
+    modelId: rate.model,
+    rateCardSnapshotId: rate.id,
+    executionMode,
+    fixturePackVersion: isReplay ? (input.fixturePackVersion ?? defaultFixture?.packVersion) : undefined,
+    fixtureId: isReplay ? (input.fixtureId ?? defaultFixture?.fixtureId) : undefined,
+  });
+
+  const previewHash = computeRequestFingerprint(template as unknown as Record<string, unknown>);
+  return { template, previewHash, rate, provider };
+}
+
+/** Authoritative read-only generation preview; shares exact resolution and compiler with admission. */
+export async function previewGeneration(
+  filmId: string,
+  operatorId: string,
+  input: GenerationPreviewRequest,
+): Promise<GenerationPreviewResponse> {
+  return pgClient.begin('isolation level read committed read only', async tx => {
+    const [film] = await tx<{ id: string }[]>`
+      SELECT id FROM films WHERE id = ${filmId} AND operator_id = ${operatorId}
+    `;
+    if (!film) {
+      throw new ApiFailure(404, 'FILM_NOT_FOUND', 'Film not found');
+    }
+
+    const { template, previewHash } = await resolveAuthoritativeMediaTemplate(
+      tx,
+      filmId,
+      operatorId,
+      input,
+      false,
+    );
+
+    return {
+      previewHash,
+      compilerVersion: COMPILER_VERSION,
+      template,
+      generatedAt: new Date().toISOString(),
+    };
+  });
+}
+
+/** One transaction creates Attempt, reservation journal, projection, receipt and dispatch intent. */
+export async function admitAttempt(filmId:string,operatorId:string,key:string,input:CreateAttempt):Promise<AttemptReceipt> {
+  const requestHash=digest(input);
+  return pgClient.begin('isolation level read committed',async tx=>{
+    const account=await ownedAccount(tx,filmId,operatorId,true);
+    const replay=await receipt<AttemptReceipt>(tx,filmId,operatorId,key,'ADMIT_ATTEMPT',requestHash);
+    if(replay)return replay;
 
     const executionMode = input.executionMode ?? 'REPLAY';
     const isReplay = executionMode === 'REPLAY';
+    const isMedia = input.kind === 'IMAGE' || input.kind === 'VIDEO';
 
-    // Disallow unverified/modeled rate cards for billable LIVE admission (PRD v1.0 §1259, §1711)
-    if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
-      throw new ApiFailure(
-        422,
-        'UNVERIFIED_LIVE_RATE_CARD',
-        'Modeled rate cards are for REPLAY/development only and cannot be admitted for LIVE execution'
+    let rate: RateRow;
+    let provider: ProviderKind;
+    let v2Template: GenerationRequestTemplateV2 | null = null;
+    let v1Prompt = '';
+
+    if (isMedia) {
+      if (!input.expectedPreviewHash) {
+        throw new ApiFailure(422, 'PREVIEW_HASH_REQUIRED', 'Image and video attempts require expectedPreviewHash');
+      }
+      const resolved = await resolveAuthoritativeMediaTemplate(
+        tx,
+        filmId,
+        operatorId,
+        {
+          storyRevisionId: input.storyRevisionId,
+          shotRevisionId: input.shotRevisionId ?? null,
+          kind: input.kind as 'IMAGE' | 'VIDEO',
+          rateCardSnapshotId: input.rateCardSnapshotId,
+          pricingUnits: input.pricingUnits,
+          executionMode,
+          fixturePackVersion: input.fixturePackVersion,
+          fixtureId: input.fixtureId,
+        },
+        true,
       );
+      if (resolved.previewHash !== input.expectedPreviewHash) {
+        throw new ApiFailure(
+          409,
+          'GENERATION_PREVIEW_STALE',
+          'Authoritative generation inputs changed since preview; generate a fresh preview before dispatching',
+        );
+      }
+      rate = resolved.rate;
+      provider = resolved.provider;
+      v2Template = resolved.template;
+    } else {
+      // TTS / ASSEMBLY stay on v1 contract and current workflow
+      const [story]=await tx<{id:string}[]>`SELECT sr.id FROM films f
+        JOIN story_revisions sr ON sr.id=f.active_story_revision_id AND sr.film_id=f.id
+        JOIN story_approvals sa ON sa.story_revision_id=sr.id
+        JOIN story_validations sv ON sv.story_revision_id=sr.id
+          AND sv.id::text=sa.evidence->>'validationRunId'
+          AND sv.context='STORY_APPROVAL'
+          AND sv.dependency_hash=sa.evidence->>'dependencyHash'
+          AND sv.rule_set_version=sa.evidence->>'ruleSetVersion'
+        WHERE f.id=${filmId} AND f.operator_id=${operatorId} AND sr.id=${input.storyRevisionId} AND sr.state='APPROVED'
+          AND sa.evidence->>'storyRevisionId'=sr.id::text AND sa.evidence->>'contentHash'=sr.content_hash
+          AND sa.evidence->>'ruleSetVersion'=${RULESET}
+        FOR UPDATE OF f`;
+      if(!story)throw new ApiFailure(409,'CURRENT_APPROVAL_REQUIRED','Attempt requires the active StoryRevision with current approval evidence');
+      if(input.shotRevisionId){
+        const [shot]=await tx<{id:string;shot_id:string}[]>`SELECT sr.id, m.shot_id FROM shot_revisions sr JOIN story_revision_shots m ON m.film_id=sr.film_id AND m.shot_revision_id=sr.id WHERE sr.id=${input.shotRevisionId} AND sr.film_id=${filmId} AND m.story_revision_id=${input.storyRevisionId}`;
+        if(!shot)throw new ApiFailure(422,'SHOT_REVISION_MISMATCH','ShotRevision is not part of the approved StoryRevision');
+      }
+      rate=await loadRate(tx,input.rateCardSnapshotId);
+      if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');
+      if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
+        throw new ApiFailure(
+          422,
+          'UNVERIFIED_LIVE_RATE_CARD',
+          'Modeled rate cards are for REPLAY/development only and cannot be admitted for LIVE execution',
+        );
+      }
+      provider = resolveProviderKind(rate.provider);
+      if (input.shotRevisionId) {
+        const [sr] = await tx<{ spec: { prompt?: string } }[]>`SELECT spec FROM shot_revisions WHERE id = ${input.shotRevisionId} AND film_id = ${filmId}`;
+        v1Prompt = sr?.spec?.prompt ?? '';
+      } else {
+        const [film] = await tx<{ brief: string }[]>`SELECT brief FROM films WHERE id = ${filmId}`;
+        v1Prompt = film?.brief ?? '';
+      }
+      if (!v1Prompt.trim()) {
+        throw new ApiFailure(422, 'EMPTY_PROMPT', 'Attempt requires a non-empty prompt from ShotRevision or Film brief');
+      }
     }
 
-    let approvedKeyframeAssetId: string | undefined = undefined;
-    if (input.kind === 'VIDEO') {
-      // In P0 / DEC-P03 / PRD v1.0 §1290, all offered video paths (Runway I2V, fal Kling I2V, Local Pan/Zoom)
-      // are image-driven and require an approved keyframe, regardless of shot classification.
-      const [approvedKeyframe] = await tx<{ asset_id: string; storage_path: string; sha256_hash: string }[]>`
-        SELECT s.asset_id, a.storage_path, a.sha256_hash
-        FROM shot_asset_selections s
-        JOIN assets a ON a.id = s.asset_id
-          AND a.film_id = s.film_id
-          AND a.shot_revision_id = s.shot_revision_id
-          AND a.kind = s.kind
-        JOIN (
-          SELECT DISTINCT ON (r.asset_id) r.asset_id, r.decision
-          FROM asset_reviews r
-          WHERE r.film_id = ${filmId}
-          ORDER BY r.asset_id, r.created_at DESC, r.id DESC
-        ) lr ON lr.asset_id = s.asset_id
-        WHERE s.story_revision_id = ${input.storyRevisionId}
-          AND s.shot_id = ${shotId}
-          AND s.kind = 'IMAGE'
-          AND s.shot_revision_id = ${input.shotRevisionId}
-          AND a.film_id = ${filmId}
-          AND a.shot_revision_id = ${input.shotRevisionId}
-          AND a.kind = 'IMAGE'
-          AND a.verified = true
-          AND lr.decision = 'APPROVED'
-        LIMIT 1
-      `;
-      if (!approvedKeyframe) {
-        throw new ApiFailure(409, 'KEYFRAME_APPROVAL_REQUIRED', 'Video dispatch requires an approved, revision-compatible keyframe asset');
-      }
-
-      approvedKeyframeAssetId = approvedKeyframe.asset_id;
-
-      const category: AssetCategory = approvedKeyframe.storage_path.startsWith('keyframes') ? 'keyframes' : 'videos';
-      const filename = path.basename(approvedKeyframe.storage_path);
-      if (!storage.exists(category, filename)) {
-        throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset missing from storage');
-      }
-      let verifiedOnDisk = false;
-      try {
-        verifiedOnDisk = await storage.verify(category, filename, approvedKeyframe.sha256_hash);
-      } catch {
-        verifiedOnDisk = false;
-      }
-      if (!verifiedOnDisk) {
-        throw new ApiFailure(409, 'INTEGRITY_CHECK_FAILED', 'Approved keyframe asset failed disk integrity check');
-      }
-    }
     const calculated=estimate(rateValue(rate),input.pricingUnits);
 
     let reservationValue: string;
@@ -235,43 +459,30 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       await tx`UPDATE film_budget_accounts SET reserved_open_usd_micros=reserved_open_usd_micros+${reservationValue},version=version+1,updated_at=now() WHERE film_id=${filmId}`;
     }
 
-    const rawProvider = rate.provider.toUpperCase().replace(/[-.]/g, '_');
-    let provider: ProviderKind;
-    if (rawProvider === 'GOOGLE' || rawProvider === 'GEMINI') provider = 'GEMINI';
-    else if (rawProvider === 'RUNWAY') provider = 'RUNWAY';
-    else if (rawProvider === 'FAL_AI' || rawProvider === 'FAL_KLING') provider = 'FAL_KLING';
-    else if (rawProvider === 'LOCAL_PAN_ZOOM') provider = 'LOCAL_PAN_ZOOM';
-    else throw new ApiFailure(422, 'UNSUPPORTED_PROVIDER', `Unsupported rate card provider: ${rate.provider}`);
-
-    let prompt = '';
-    if (input.shotRevisionId) {
-      const [sr] = await tx<{ spec: { prompt?: string } }[]>`SELECT spec FROM shot_revisions WHERE id = ${input.shotRevisionId} AND film_id = ${filmId}`;
-      prompt = sr?.spec?.prompt ?? '';
+    let snapshot: ReturnType<typeof freezeGenerationRequestSnapshot>;
+    if (v2Template) {
+      snapshot = freezeGenerationRequestSnapshot({
+        ...v2Template,
+        schemaVersion: '2',
+        attemptId,
+      });
     } else {
-      const [film] = await tx<{ brief: string }[]>`SELECT brief FROM films WHERE id = ${filmId}`;
-      prompt = film?.brief ?? '';
+      const defaultFixture = isReplay && !input.fixtureId
+        ? resolveDefaultFixture({ provider, kind: input.kind, aspectRatio: '9:16' })
+        : null;
+      snapshot = freezeGenerationRequestSnapshot({
+        attemptId,
+        filmId,
+        shotRevisionId: input.shotRevisionId ?? null,
+        kind: input.kind,
+        provider,
+        executionMode,
+        prompt: v1Prompt.trim(),
+        aspectRatio: '9:16',
+        fixturePackVersion: input.fixturePackVersion ?? defaultFixture?.packVersion,
+        fixtureId: input.fixtureId ?? defaultFixture?.fixtureId,
+      });
     }
-    if (!prompt.trim()) {
-      throw new ApiFailure(422, 'EMPTY_PROMPT', 'Attempt requires a non-empty prompt from ShotRevision or Film brief');
-    }
-
-    const defaultFixture = isReplay && !input.fixtureId
-      ? resolveDefaultFixture({ provider, kind: input.kind, aspectRatio: '9:16' })
-      : null;
-
-    const snapshot = freezeGenerationRequestSnapshot({
-      attemptId,
-      filmId,
-      shotRevisionId: input.shotRevisionId ?? null,
-      kind: input.kind,
-      provider,
-      executionMode,
-      prompt: prompt.trim(),
-      aspectRatio: '9:16',
-      keyframeAssetId: approvedKeyframeAssetId,
-      fixturePackVersion: input.fixturePackVersion ?? defaultFixture?.packVersion,
-      fixtureId: input.fixtureId ?? defaultFixture?.fixtureId,
-    });
 
     const queueName = resolveOutboxQueue(input.kind, executionMode);
     await tx`INSERT INTO dispatch_outbox(id,attempt_id,queue_name,payload) VALUES(${randomUUID()},${attemptId},${queueName},${JSON.stringify(snapshot)}::jsonb)`;

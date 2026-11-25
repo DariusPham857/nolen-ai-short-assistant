@@ -227,4 +227,63 @@ describe('Provider Dispatch Contracts (PD-01)', () => {
       fixturePackVersion: '../v1',
     })).toThrow(/fixturePackVersion/i);
   });
+
+  it('validates GenerationRequestV2 invariants while preserving legacy v1 without schemaVersion injection (GI-03)', () => {
+    const legacyV1 = {
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      filmId: '22222222-2222-4222-8222-222222222222',
+      kind: 'IMAGE',
+      provider: 'GEMINI',
+      prompt: 'Legacy v1 prompt',
+    };
+    const parsedV1 = generationRequestSchema.parse(legacyV1);
+    expect('schemaVersion' in parsedV1).toBe(false);
+
+    const baseV2 = {
+      schemaVersion: '2' as const,
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      filmId: '22222222-2222-4222-8222-222222222222',
+      storyRevisionId: '33333333-3333-4333-8333-333333333333',
+      shotRevisionId: '44444444-4444-4444-8444-444444444444',
+      kind: 'VIDEO' as const,
+      provider: 'RUNWAY' as const,
+      modelId: 'gen4_turbo',
+      rateCardSnapshotId: '55555555-5555-4555-8555-555555555555',
+      executionMode: 'REPLAY' as const,
+      prompt: 'Hero steps forward slowly',
+      negativePrompt: 'blur',
+      promptCompilerVersion: 'generation-intent-1' as const,
+      shotDependencyHash: 'c'.repeat(64),
+      camera: { angle: 'LOW_ANGLE' as const, framing: 'Medium', movement: 'Slow push-in' },
+      aspectRatio: '9:16' as const,
+      durationSeconds: 5,
+      inputAssets: [],
+      structuredIntent: {
+        shotType: 'CHARACTER' as const,
+        authoredPrompt: 'Hero steps forward slowly',
+        camera: { angle: 'LOW_ANGLE' as const, framing: 'Medium', movement: 'Slow push-in' },
+        location: { id: 'room', name: 'Room', description: 'Quiet studio' },
+        styleRef: { id: 'cinema', name: 'Cinema', description: 'Warm light' },
+        subjects: [],
+        wardrobes: [],
+        props: [],
+        continuity: { startLighting: 'Warm', endLighting: 'Warm', startCharacters: [], endCharacters: [] },
+        intendedTransitions: [],
+      },
+      fixturePackVersion: 'v1',
+      fixtureId: 'default-runway-video-9-16',
+    };
+    const parsedV2 = generationRequestSchema.parse(baseV2);
+    expect('schemaVersion' in parsedV2 && parsedV2.schemaVersion).toBe('2');
+
+    // REPLAY v2 without fixture fails
+    const { fixtureId: _f, ...missingFixture } = baseV2;
+    expect(() => generationRequestSchema.parse(missingFixture)).toThrow();
+
+    // LIVE v2 with fixture fails
+    expect(() => generationRequestSchema.parse({ ...baseV2, executionMode: 'LIVE' })).toThrow();
+
+    // VIDEO > 1000 chars fails
+    expect(() => generationRequestSchema.parse({ ...baseV2, prompt: 'x'.repeat(1001) })).toThrow();
+  });
 });
