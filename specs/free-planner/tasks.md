@@ -12,7 +12,7 @@ Source: [spec](spec.md)
 | FP-02a | R0 | REQUIRED (depends on FP-00) | Billing attestation guard (`=== "true"`), pinned model guard, `pnpm planner:preflight` | `servers/src/stories/free-planner.test.ts` (`PASS`, 5/5) |
 | FP-02b | R1 | REQUIRED (depends on FP-01, FP-02a) | Gemini native `fetch` adapter, 512 KiB stream cap, error mapping, pure validator findings | `servers/src/stories/free-planner.test.ts` (`PASS`, 5/5) |
 | FP-03 | R1 | REQUIRED (depends on FP-01, FP-02b) | Storyboard `Generate story with Gemini` UI, versioned draft envelope, stale findings | `typecheck` & `lint` `PASS`; production browser suite `PASS`, 19/19, including `FP-AT-05` / `FP-AT-05b` at `3d5ad01` (CI evidence below) |
-| FP-04 | R1 | REQUIRED (depends on FP-01..FP-03) | Quality gates, evidence checks, opt-in live smoke test | `typecheck` `PASS`, `lint` `PASS`, `check:evidence` `PASS`; `FP-AT-06` live smoke test `NOT_IMPLEMENTED` (runtime integration unverified) |
+| FP-04 | R1 | REQUIRED (depends on FP-01..FP-03) | Quality gates, evidence checks, `pnpm planner:smoke` opt-in CLI + shared transport hardening (`redirect: 'error'`, 60s body-read deadline) | Automated `vitest` (`free-planner.test.ts`, `planner-smoke.test.ts`), `typecheck`, `lint`, `check:evidence` `PASS`; live `FP-AT-06` run `NOT_IMPLEMENTED` (operator-attested pre-check + live run pending) |
 
 ### Test-First Evidence (R0 / R1)
 - **Test**: `packages/contracts/src/story.test.ts > validates planProposalRequestSchema defaults and strict storyProposalV2Schema boundaries (FP-AT-01)`
@@ -23,6 +23,10 @@ Source: [spec](spec.md)
   - **Command**: `pnpm --filter @nolen/server exec vitest run src/stories/free-planner.test.ts`
   - **RED Evidence**: `5 failed (5)`: `AssertionError: expected Error: NOT_IMPLEMENTED to be an instance of ApiFailure` (billing guard & error mapping) and `expected 'UNKNOWN' to be true` (preflight).
   - **GREEN Evidence**: `Test Files 2 passed (2) | Tests 14 passed (14)` (`domain.test.ts` + `free-planner.test.ts`) with `pnpm typecheck` and `pnpm lint` (`--max-warnings 0`) passing.
+- **Test**: `servers/src/stories/free-planner.test.ts` (redirect/stream-timeout prerequisites) & `servers/src/stories/planner-smoke.test.ts` (`FP-AT-06`)
+  - **Command**: `pnpm --filter @nolen/server exec vitest run src/stories/free-planner.test.ts src/stories/planner-smoke.test.ts`
+  - **RED Evidence**: `8 failed (8)`: `expected undefined to be 'error'` (`redirect` on preflight GET and generation POST) and `Error: NOT_IMPLEMENTED` / `NOT_IMPLEMENTED` across all 6 smoke runner/parser/redaction tests.
+  - **GREEN Evidence**: `Test Files 3 passed (3) | Tests 21 passed (21)` (`free-planner.test.ts` 6/6, `planner-smoke.test.ts` 6/6, `domain.test.ts` 9/9) + `pnpm --filter @nolen/server typecheck` & `lint` `PASS` + `pnpm planner:smoke` default `SKIPPED` (exit 0).
 
 ## Handoff
 Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
@@ -30,8 +34,11 @@ Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
   - [packages/contracts/src/story.ts](../../packages/contracts/src/story.ts) (`planProposalRequestSchema`, `storyProposalV2Schema`, `proposalToStoryContentV2`, `proposalProvenanceSchema`, `findingSchema`, `planProposalResponseSchema`, `storyDraftEnvelopeSchema`, `parseStoryDraftEnvelope`)
   - [packages/contracts/src/story.test.ts](../../packages/contracts/src/story.test.ts) (`FP-AT-01`)
   - [servers/src/config/env.ts](../../servers/src/config/env.ts) (`GEMINI_NO_BILLING_ATTESTED`, `GEMINI_FREE_PLANNER_MODEL`)
-  - [servers/src/stories/free-planner.ts](../../servers/src/stories/free-planner.ts) (`assertFreePlannerConfig`, `checkFreePlannerPreflight`, `generateGeminiStoryProposal`)
-  - [servers/src/stories/free-planner.test.ts](../../servers/src/stories/free-planner.test.ts) (`FP-AT-02`, `FP-AT-03`)
+  - [servers/src/stories/free-planner.ts](../../servers/src/stories/free-planner.ts) (`assertFreePlannerConfig`, `checkFreePlannerPreflight`, `generateGeminiStoryProposal`, `redirect: 'error'`, 60s body-read deadline)
+  - [servers/src/stories/free-planner.test.ts](../../servers/src/stories/free-planner.test.ts) (`FP-AT-02`, `FP-AT-03`, transport hardening)
+  - [servers/src/stories/planner-smoke.ts](../../servers/src/stories/planner-smoke.ts) (`parsePlannerSmokeArgs`, `runPlannerSmoke`)
+  - [servers/src/stories/planner-smoke.test.ts](../../servers/src/stories/planner-smoke.test.ts) (`FP-AT-06` automated runner/redaction tests)
+  - [servers/src/scripts/planner-smoke.ts](../../servers/src/scripts/planner-smoke.ts) (`pnpm planner:smoke` CLI)
   - [servers/src/stories/free-planner.integration.test.ts](../../servers/src/stories/free-planner.integration.test.ts) (`FP-AT-04`)
   - [servers/src/scripts/planner-preflight.ts](../../servers/src/scripts/planner-preflight.ts) + [servers/package.json](../../servers/package.json) + [package.json](../../package.json) (`pnpm planner:preflight`)
   - [servers/src/http/story-api.ts](../../servers/src/http/story-api.ts) (snapshot + token check + Gemini call + re-read snapshot `409`/`404`)

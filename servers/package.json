@@ -23,6 +23,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "health:check": "tsx src/scripts/health-check.ts",
     "planner:preflight": "tsx src/scripts/planner-preflight.ts",
+    "planner:smoke": "tsx src/scripts/planner-smoke.ts",
     "test:guardrails": "node --test scripts/check-guardrails.test.mjs",
     "test:evidence": "node --test ../scripts/check-evidence.test.mjs",
     "check:evidence": "node ../scripts/check-evidence.mjs"

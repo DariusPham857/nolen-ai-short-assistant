@@ -119,6 +119,25 @@ describe('FP-02a billing guard and preflight (R0)', () => {
     expect(netFail.billingTierStatus).toBe('UNKNOWN');
     expect(netFail.ready).toBe(false);
   });
+
+  it('passes redirect: error and cancels unused body on metadata preflight GET (FP-AT-06 prerequisite)', async () => {
+    const cancelSpy = vi.fn(async () => undefined);
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"name":"models/gemini-3.5-flash-lite"}'));
+      },
+      cancel: cancelSpy,
+    });
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    const res = await checkFreePlannerPreflight({
+      env: { GEMINI_API_KEY: 'secret-key', GEMINI_NO_BILLING_ATTESTED: 'true' },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(res.ready).toBe(true);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.redirect).toBe('error');
+    expect(cancelSpy).toHaveBeenCalled();
+  });
 });
 
 describe('FP-02b Gemini transport and validation (R1)', () => {
@@ -238,5 +257,43 @@ describe('FP-02b Gemini transport and validation (R1)', () => {
       502,
       'FREE_PLANNER_INVALID_OUTPUT',
     );
+
+    // redirect: 'error' is set on generation POST
+    const redirectCheckFetch = vi.fn(async () => geminiOkResponse());
+    await generateGeminiStoryProposal(filmInput, { env: validEnv, fetchImpl: redirectCheckFetch as unknown as typeof fetch });
+    const [, postInit] = redirectCheckFetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(postInit.redirect).toBe('error');
+
+    // Headers arrive immediately, body stream hangs past deadline -> 504 FREE_PLANNER_TIMEOUT
+    const hangingFetch = vi.fn(async (_u: string, init?: RequestInit) => {
+      const hangingStream = new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => {
+            controller.error(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+          });
+        },
+      });
+      return new Response(hangingStream, { status: 200 });
+    });
+    await expectApiFailure(
+      () => generateGeminiStoryProposal(filmInput, { env: validEnv, fetchImpl: hangingFetch as unknown as typeof fetch, timeoutMs: 15 }),
+      504,
+      'FREE_PLANNER_TIMEOUT',
+    );
+    expect(hangingFetch).toHaveBeenCalledTimes(1);
+
+    // Non-timeout stream read error -> 502 FREE_PLANNER_UPSTREAM_FAILED
+    const brokenStream = new ReadableStream({
+      start(controller) {
+        controller.error(new Error('socket reset'));
+      },
+    });
+    const brokenFetch = vi.fn(async () => new Response(brokenStream, { status: 200 }));
+    await expectApiFailure(
+      () => generateGeminiStoryProposal(filmInput, { env: validEnv, fetchImpl: brokenFetch as unknown as typeof fetch }),
+      502,
+      'FREE_PLANNER_UPSTREAM_FAILED',
+    );
+    expect(brokenFetch).toHaveBeenCalledTimes(1);
   });
 });
