@@ -94,7 +94,7 @@ test('Gemini proposal loads LIVE_LLM provenance, preserves draft on error, survi
     await route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({error:{code:'FREE_PLANNER_BILLING_UNATTESTED',message:'Attestation required',requestId:'test-only'}})});
   });
   await page.getByRole('button',{name:'Generate story with Gemini',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Attestation required');
+  await expect(page.getByRole('alert').filter({hasText:'Attestation required'})).toContainText('Attestation required');
   await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Draft before Gemini error');
   await page.unroute('**/storyboard/plan-proposals');
 
@@ -160,7 +160,7 @@ test('Gemini proposal locks workspace with storageBlocked when sessionStorage.se
   });
 
   await page.getByRole('button',{name:'Generate story with Gemini',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Tab storage is unavailable. Restore storage before sending changes.');
+  await expect(page.getByRole('alert').filter({hasText:'Tab storage is unavailable. Restore storage before sending changes.'})).toContainText('Tab storage is unavailable. Restore storage before sending changes.');
   await expect(page.getByRole('button',{name:'Discard local state',exact:true})).toBeEnabled();
   await expect(page.getByLabel('Shot prompt',{exact:true})).toBeDisabled();
   await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Saved before quota error');
