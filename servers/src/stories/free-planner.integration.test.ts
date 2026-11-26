@@ -3,7 +3,8 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { canonicalStoryV2, normalizeFilm, type Expected, type Storyboard } from '@nolen/contracts';
 import { createStoryApi } from '../http/story-api.js';
 import { createFilm } from '../films/repository.js';
-import { pgClient } from '../db/index.js';
+import { pgClient, db } from '../db/index.js';
+import { films } from '../db/schema/films.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { unlock } from '../auth/sessions.js';
 
@@ -150,8 +151,14 @@ it('verifies ownership, stale token, mid-flight barriers (story/brief/duration/d
   const storyConflict = await pendingStory;
   expect(storyConflict.status).toBe(409);
 
-  // 6. Mid-flight film deleted -> 404 FILM_NOT_FOUND
-  const tempFilm = await createFilm(baseInput, randomUUID(), 'local-operator');
+  // 6. Mid-flight film deleted -> 404 FILM_NOT_FOUND (bare film row without append-only budget_limit_events)
+  const [tempFilm] = await db.insert(films).values({
+    ...baseInput,
+    budgetLimitUsdMicros: BigInt(baseInput.budgetLimitUsdMicros),
+    operatorId: 'local-operator',
+    idempotencyKey: randomUUID(),
+    requestHash: '0'.repeat(64),
+  }).returning();
   const enteredDelete = createDeferred();
   const releaseDelete = createDeferred();
   const apiDelete = createStoryApi({
