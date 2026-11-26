@@ -326,19 +326,49 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
     `;
     expect(outboxReplayAssembly.queue_name).toBe('replay:assembly:dispatch');
 
-    // LIVE IMAGE
-    const { receipt: liveImage } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
-      storyRevisionId: s.storyRevisionId,
+    // Remote providers reject LIVE admission with 422 LIVE_PROVIDER_UNAVAILABLE until PD-05b-CORE (LP-AT-04)
+    await expect(
+      previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
+        storyRevisionId: s.storyRevisionId,
+        shotRevisionId: s.shotRevisionId,
+        kind: 'IMAGE',
+        rateCardSnapshotId: s.geminiRateId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'LIVE_PROVIDER_UNAVAILABLE' });
+
+    // Verified LIVE LOCAL_PAN_ZOOM VIDEO routes cleanly to live:generation:dispatch after START_FRAME approval
+    const localVideoRateId = randomUUID();
+    await pgClient`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+      VALUES(${localVideoRateId}, 'LOCAL_PAN_ZOOM', 'ffmpeg-pan-zoom', 'VIDEO', 'FIXED_PER_REQUEST', 0, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED (LP-001)')`;
+
+    const kfAttemptId = randomUUID();
+    await pgClient`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+      VALUES(${kfAttemptId}, ${s.filmId}, ${s.storyRevisionId}, ${s.shotRevisionId}, 'IMAGE', 'google', 'gemini-3.1-flash-image', ${s.geminiRateId}, 1, 0, 'SUCCEEDED', 'REPLAY')`;
+    const kfAsset = await fakeAssetProducer({
+      filmId: s.filmId,
+      attemptId: kfAttemptId,
       shotRevisionId: s.shotRevisionId,
       kind: 'IMAGE',
-      rateCardSnapshotId: s.geminiRateId,
-      pricingUnits: 1,
+    });
+    await pgClient`INSERT INTO shot_asset_selections(film_id, story_revision_id, shot_id, shot_revision_id, kind, asset_id, selected_by)
+      VALUES(${s.filmId}, ${s.storyRevisionId}, ${s.shotId}, ${s.shotRevisionId}, 'IMAGE', ${kfAsset.id}, 'local-operator')`;
+    await pgClient`INSERT INTO asset_reviews(id, film_id, asset_id, shot_revision_id, decision, actor_id, reason)
+      VALUES(${randomUUID()}, ${s.filmId}, ${kfAsset.id}, ${s.shotRevisionId}, 'APPROVED', 'local-operator', 'Approved start frame')`;
+
+    const { receipt: liveLocalVideo } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
+      storyRevisionId: s.storyRevisionId,
+      shotRevisionId: s.shotRevisionId,
+      kind: 'VIDEO',
+      rateCardSnapshotId: localVideoRateId,
+      pricingUnits: 5,
       executionMode: 'LIVE',
     });
-    const [outboxLiveImage] = await pgClient<{ queue_name: string }[]>`
-      SELECT queue_name FROM dispatch_outbox WHERE attempt_id = ${liveImage.attemptId}
+    const [outboxLiveVideo] = await pgClient<{ queue_name: string }[]>`
+      SELECT queue_name FROM dispatch_outbox WHERE attempt_id = ${liveLocalVideo.attemptId}
     `;
-    expect(outboxLiveImage.queue_name).toBe('live:generation:dispatch');
+    expect(outboxLiveVideo.queue_name).toBe('live:generation:dispatch');
 
     // LIVE TTS
     const liveTts = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {

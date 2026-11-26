@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { deflateSync } from 'node:zlib';
 import PgBoss from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { canonicalStoryV2 } from '@nolen/contracts';
@@ -10,6 +11,54 @@ import { startWorker, type WorkerOptions } from './index.js';
 import { WorkerLoopRunner } from './shutdown.js';
 import { relayOne, type BossContract } from '../financial/outbox.js';
 import { fakeAssetProducer } from '../assets/repository.js';
+import { storage } from '../lib/storage.js';
+import { seedBaselineRateCards } from '../db/seed-rate-cards.js';
+
+function makeStaticPng320(): Buffer {
+  const width = 320;
+  const height = 320;
+  const stride = 1 + width * 3;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * stride] = 0;
+    for (let x = 0; x < width; x++) {
+      const off = y * stride + 1 + x * 3;
+      raw[off] = 40;
+      raw[off + 1] = 120;
+      raw[off + 2] = 200;
+    }
+  }
+  const crcTable = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crcTable[n] = c >>> 0;
+  }
+  const crc32 = (buf: Buffer) => {
+    let c = 0xffffffff;
+    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const typeBuf = Buffer.from(type, 'ascii');
+    const lenBuf = Buffer.alloc(4);
+    lenBuf.writeUInt32BE(data.length, 0);
+    const crcBuf = Buffer.alloc(4);
+    crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
+    return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 const isLiveDb = Boolean(process.env.DATABASE_URL);
 const token = 'worker-test-operator-token-32b';
@@ -282,16 +331,19 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
     });
 
     try {
-      // 1. Admit 3 LIVE attempts: IMAGE (v2 via preview), TTS (v1), ASSEMBLY (v1)
-      const { receipt: liveImage } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
-        storyRevisionId: s.storyRevisionId,
-        shotRevisionId: s.shotRevisionId,
-        kind: 'IMAGE',
-        rateCardSnapshotId: s.geminiRateId,
-        pricingUnits: 1,
-        executionMode: 'LIVE',
-      });
+      // LP-AT-04: Remote LIVE providers must be rejected at admission before dispatch
+      await expect(
+        previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
+          storyRevisionId: s.storyRevisionId,
+          shotRevisionId: s.shotRevisionId,
+          kind: 'IMAGE',
+          rateCardSnapshotId: s.geminiRateId,
+          pricingUnits: 1,
+          executionMode: 'LIVE',
+        }),
+      ).rejects.toMatchObject({ status: 422, code: 'LIVE_PROVIDER_UNAVAILABLE' });
 
+      // 1. Admit 2 non-generation LIVE attempts: TTS (v1), ASSEMBLY (v1)
       const liveTts = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
         storyRevisionId: s.storyRevisionId,
         shotRevisionId: null,
@@ -310,28 +362,21 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
         executionMode: 'LIVE',
       });
 
-      expect(liveImage.reservationUsdMicros).toBe('200000');
-      expect(liveImage.billingStatus).toBe('PENDING');
-
-      // Verify outbox queue names are correctly routed to live:*
-      const [outboxImage] = await pgClient<{ queue_name: string }[]>`SELECT queue_name FROM dispatch_outbox WHERE attempt_id = ${liveImage.attemptId}`;
-      expect(outboxImage.queue_name).toBe('live:generation:dispatch');
-
       const [outboxTts] = await pgClient<{ queue_name: string }[]>`SELECT queue_name FROM dispatch_outbox WHERE attempt_id = ${liveTts.attemptId}`;
       expect(outboxTts.queue_name).toBe('live:tts:dispatch');
 
       const [outboxAssembly] = await pgClient<{ queue_name: string }[]>`SELECT queue_name FROM dispatch_outbox WHERE attempt_id = ${liveAssembly.attemptId}`;
       expect(outboxAssembly.queue_name).toBe('live:assembly:dispatch');
 
-      // Poll until relay delivers all 3 attempts to pg-boss
+      // Poll until relay delivers both LIVE TTS/ASSEMBLY attempts to pg-boss
       const startRelayWait = Date.now();
       let allDelivered = false;
       while (Date.now() - startRelayWait < 10000) {
         const outboxRows = await pgClient<{ status: string; enqueue_outcome: string }[]>`
           SELECT status, enqueue_outcome FROM dispatch_outbox
-          WHERE attempt_id IN (${liveImage.attemptId}, ${liveTts.attemptId}, ${liveAssembly.attemptId})
+          WHERE attempt_id IN (${liveTts.attemptId}, ${liveAssembly.attemptId})
         `;
-        if (outboxRows.length === 3 && outboxRows.every(r => r.status === 'DELIVERED')) {
+        if (outboxRows.length === 2 && outboxRows.every(r => r.status === 'DELIVERED')) {
           allDelivered = true;
           break;
         }
@@ -339,24 +384,24 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       }
       expect(allDelivered).toBe(true);
 
-      // Verify outbox rows: NEVER EXHAUSTED! status is DELIVERED, outcome is JOB_ID
+      // Verify outbox rows: status is DELIVERED, outcome is JOB_ID
       const deliveredRows = await pgClient<{ status: string; enqueue_outcome: string; boss_job_id: string }[]>`
         SELECT status, enqueue_outcome, boss_job_id FROM dispatch_outbox
-        WHERE attempt_id IN (${liveImage.attemptId}, ${liveTts.attemptId}, ${liveAssembly.attemptId})
+        WHERE attempt_id IN (${liveTts.attemptId}, ${liveAssembly.attemptId})
       `;
-      expect(deliveredRows).toHaveLength(3);
+      expect(deliveredRows).toHaveLength(2);
       for (const row of deliveredRows) {
         expect(row.status).toBe('DELIVERED');
         expect(row.enqueue_outcome).toBe('JOB_ID');
         expect(row.boss_job_id).toBeTruthy();
       }
 
-      // Verify all 3 attempts MUST still be QUEUED (replay worker never consumes live:* queues!)
+      // Verify live:tts and live:assembly attempts MUST stay QUEUED (no worker subscribed)
       const attRows = await pgClient<{ id: string; state: string; execution_mode: string }[]>`
         SELECT id, state, execution_mode FROM attempts
-        WHERE id IN (${liveImage.attemptId}, ${liveTts.attemptId}, ${liveAssembly.attemptId})
+        WHERE id IN (${liveTts.attemptId}, ${liveAssembly.attemptId})
       `;
-      expect(attRows).toHaveLength(3);
+      expect(attRows).toHaveLength(2);
       for (const att of attRows) {
         expect(att.state).toBe('QUEUED');
         expect(att.execution_mode).toBe('LIVE');
@@ -365,9 +410,9 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       // Financial reservations MUST remain open and intact
       const finRows = await pgClient<{ reservation_open_usd_micros: string; billing_status: string }[]>`
         SELECT reservation_open_usd_micros, billing_status FROM attempt_financial_state
-        WHERE attempt_id IN (${liveImage.attemptId}, ${liveTts.attemptId}, ${liveAssembly.attemptId})
+        WHERE attempt_id IN (${liveTts.attemptId}, ${liveAssembly.attemptId})
       `;
-      expect(finRows).toHaveLength(3);
+      expect(finRows).toHaveLength(2);
       for (const fs of finRows) {
         expect(BigInt(fs.reservation_open_usd_micros) > 0n).toBe(true);
         expect(fs.billing_status).toBe('PENDING');
@@ -376,9 +421,97 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       // Ledger events: exactly 1 per live attempt (RESERVATION_CREATED), zero charges/releases
       const [ledgerCount] = await pgClient<{ count: string }[]>`
         SELECT count(*)::text as count FROM cost_ledger_events
-        WHERE attempt_id IN (${liveImage.attemptId}, ${liveTts.attemptId}, ${liveAssembly.attemptId})
+        WHERE attempt_id IN (${liveTts.attemptId}, ${liveAssembly.attemptId})
       `;
-      expect(ledgerCount.count).toBe('3');
+      expect(ledgerCount.count).toBe('2');
+    } finally {
+      await worker.shutdown();
+      await pgClient.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    }
+  });
+
+  it('LP-03: executes LIVE LOCAL_PAN_ZOOM VIDEO via live:generation:dispatch with real FFmpeg and fails closed on non-local LIVE payloads', async () => {
+    await pgClient`UPDATE dispatch_outbox SET status='DELIVERED', enqueue_outcome='WORKER_CONFIRMED', delivered_at=now() WHERE status = 'PENDING'`;
+    await seedBaselineRateCards(pgClient);
+    const localVerifiedRateId = '00000000-0000-4000-a000-000000000005';
+
+    const s = await seedWorkerSetup();
+    // Upgrade START_FRAME asset on disk & DB to a valid 320x320 PNG so real FFmpeg decodes it cleanly
+    const pngBytes = makeStaticPng320();
+    const pngSha = createHash('sha256').update(pngBytes).digest('hex');
+    await storage.write('keyframes', `${pngSha}.png`, pngBytes);
+    await pgClient`
+      UPDATE assets
+      SET storage_path = ${`keyframes/${pngSha}.png`},
+          sha256_hash = ${pngSha},
+          byte_size = ${String(pngBytes.byteLength)},
+          metadata = ${JSON.stringify({ provenance: 'REPLAY_FIXTURE', executionMode: 'REPLAY', provider: 'GEMINI' })}::jsonb
+      WHERE film_id = ${s.filmId} AND kind = 'IMAGE'
+    `;
+
+    const schema = `wb_${randomUUID().replaceAll('-', '').slice(0, 20)}`;
+    const boss = new PgBoss({ connectionString: process.env.DATABASE_URL!, schema });
+    boss.on('error', () => undefined);
+
+    const relayRunner = new WorkerLoopRunner({
+      intervalMs: 100,
+      passFn: async () => {
+        try {
+          await relayOne(boss as unknown as BossContract);
+        } catch (error) {
+          console.error('[worker] Outbox relay pass failed:', error);
+        }
+      },
+    });
+
+    const worker = await startWorker({
+      boss: boss as unknown as WorkerOptions['boss'],
+      relayRunner,
+      registerSignals: false,
+      exitFn: () => {},
+    });
+
+    try {
+      const { receipt } = await previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
+        storyRevisionId: s.storyRevisionId,
+        shotRevisionId: s.shotRevisionId,
+        kind: 'VIDEO',
+        rateCardSnapshotId: localVerifiedRateId,
+        pricingUnits: 5,
+        executionMode: 'LIVE',
+      });
+
+      const terminal = await pollAttemptState(receipt.attemptId, 25000);
+      expect(terminal).toBe('SUCCEEDED');
+
+      const [videoAsset] = await pgClient<{ storage_path: string; metadata: Record<string, unknown> }[]>`
+        SELECT storage_path, metadata FROM assets WHERE attempt_id = ${receipt.attemptId}
+      `;
+      expect(videoAsset.metadata).toMatchObject({
+        provenance: 'LOCAL_PIPELINE',
+        executionMode: 'LIVE',
+        provider: 'LOCAL_PAN_ZOOM',
+        startFrameProvenance: 'REPLAY_FIXTURE',
+      });
+      expect(storage.exists('videos', videoAsset.storage_path.replace('videos/', ''))).toBe(true);
+
+      // Verify unexpected remote LIVE payload on live:generation:dispatch fails closed
+      const badAttemptId = randomUUID();
+      await pgClient.begin(async tx => {
+        await tx`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+          VALUES(${badAttemptId}, ${s.filmId}, ${s.storyRevisionId}, ${s.shotRevisionId}, 'IMAGE', 'GEMINI', 'gemini-3.1-flash-image', ${s.geminiRateId}, 1, '200000', 'QUEUED', 'LIVE')`;
+        await tx`INSERT INTO attempt_financial_state(attempt_id, billing_status, reservation_open_usd_micros)
+          VALUES(${badAttemptId}, 'PENDING', '200000')`;
+        await tx`INSERT INTO dispatch_outbox(id, attempt_id, queue_name, payload, status, enqueue_outcome)
+          VALUES(${randomUUID()}, ${badAttemptId}, 'live:generation:dispatch', ${JSON.stringify({ request: { attemptId: badAttemptId, provider: 'GEMINI' } })}::jsonb, 'PENDING', 'NOT_ATTEMPTED')`;
+      });
+
+      const badTerminal = await pollAttemptState(badAttemptId, 10000);
+      expect(badTerminal).toBe('FAILED');
+      const [badOutbox] = await pgClient<{ status: string; enqueue_outcome: string }[]>`
+        SELECT status, enqueue_outcome FROM dispatch_outbox WHERE attempt_id = ${badAttemptId}
+      `;
+      expect(badOutbox).toEqual({ status: 'DELIVERED', enqueue_outcome: 'WORKER_CONFIRMED' });
     } finally {
       await worker.shutdown();
       await pgClient.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

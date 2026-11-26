@@ -286,4 +286,58 @@ describe('Provider Dispatch Contracts (PD-01)', () => {
     // VIDEO > 1000 chars fails
     expect(() => generationRequestSchema.parse({ ...baseV2, prompt: 'x'.repeat(1001) })).toThrow();
   });
+
+  it('validates LOCAL_PIPELINE provenance, LOCAL_STORAGE locator, and START_FRAME lineage (LP-01)', async () => {
+    const mod = await import('./providers.js');
+    expect(mod.provenanceSchema.parse('LOCAL_PIPELINE')).toBe('LOCAL_PIPELINE');
+
+    const localUpdate = {
+      providerJobId: 'local-pz-111',
+      state: 'SUCCEEDED',
+      provenance: 'LOCAL_PIPELINE',
+      locator: {
+        kind: 'LOCAL_STORAGE',
+        category: 'videos',
+        filename: `${'a'.repeat(64)}.mp4`,
+        sha256: 'a'.repeat(64),
+      },
+    };
+    expect(mod.providerStatusUpdateSchema.parse(localUpdate).locator?.kind).toBe('LOCAL_STORAGE');
+
+    // Path traversal filename rejected
+    expect(() => mod.providerStatusUpdateSchema.parse({
+      ...localUpdate,
+      locator: { kind: 'LOCAL_STORAGE', category: 'videos', filename: '../evil.mp4', sha256: 'a'.repeat(64) },
+    })).toThrow();
+
+    // Remote mediaUrl forbidden with LOCAL_PIPELINE
+    expect(() => mod.providerStatusUpdateSchema.parse({
+      ...localUpdate,
+      mediaUrl: 'https://example.com/v.mp4',
+    })).toThrow();
+
+    // Metadata schema enforces upstream startFrameProvenance
+    const metaSchema = (mod as Record<string, unknown>).localVideoMetadataSchema as { parse: (v: unknown) => unknown } | undefined;
+    expect(metaSchema).toBeDefined();
+    expect(() => metaSchema!.parse({
+      provenance: 'LOCAL_PIPELINE',
+      executionMode: 'LIVE',
+      provider: 'LOCAL_PAN_ZOOM',
+      cameraMovement: 'Slow push-in',
+      durationSeconds: 5,
+      startFrameAssetId: '11111111-1111-4111-8111-111111111111',
+      startFrameSha256: 'b'.repeat(64),
+      startFrameProvenance: 'REPLAY_FIXTURE',
+    })).not.toThrow();
+    expect(() => metaSchema!.parse({
+      provenance: 'LOCAL_PIPELINE',
+      executionMode: 'LIVE',
+      provider: 'LOCAL_PAN_ZOOM',
+      cameraMovement: 'Slow push-in',
+      durationSeconds: 5,
+      startFrameAssetId: '11111111-1111-4111-8111-111111111111',
+      startFrameSha256: 'b'.repeat(64),
+      startFrameProvenance: 'LOCAL_PIPELINE',
+    })).toThrow();
+  });
 });

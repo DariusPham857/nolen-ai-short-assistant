@@ -37,10 +37,20 @@ export const BASELINE_REPLAY_RATE_CARDS = [
     unitPriceUsdMicros: '0', // $0.00 static shot bypass route (DEC-P03)
     sourceRef: 'MODELED_ONLY (DEC-P03 local FFmpeg pan/zoom static shot cost lever for REPLAY/DEV)',
   },
+  {
+    id: '00000000-0000-4000-a000-000000000005',
+    provider: 'LOCAL_PAN_ZOOM',
+    model: 'ffmpeg-pan-zoom',
+    operation: 'VIDEO',
+    rateType: 'FIXED_PER_REQUEST',
+    unitPriceUsdMicros: '0', // $0.00 API fee local FFmpeg deterministic pan/zoom (DEC-P03 / LP-001)
+    sourceRef: 'LOCAL_VERIFIED (DEC-P03 FFmpeg deterministic pan/zoom, $0.00 API fee)',
+  },
 ] as const;
 
 /**
- * Idempotently provisions baseline MODELED_ONLY rate cards for REPLAY/DEV execution.
+ * Idempotently provisions baseline rate cards for REPLAY/DEV execution
+ * and the verified $0.00 API fee LOCAL_PAN_ZOOM rate card for LIVE local renders.
  */
 export async function seedBaselineRateCards(client: postgres.Sql): Promise<void> {
   for (const rc of BASELINE_REPLAY_RATE_CARDS) {

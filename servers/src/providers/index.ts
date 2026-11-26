@@ -38,6 +38,9 @@ export function createFakeProviderAdapter(kind: ProviderKind): ProviderAdapter {
  */
 export function createProviderAdapter(kind: ProviderKind, mode: ExecutionMode = 'REPLAY'): ProviderAdapter {
   if (mode === 'LIVE') {
+    if (kind === 'LOCAL_PAN_ZOOM') {
+      return new LocalPanZoomAdapter('LIVE');
+    }
     // Fail closed: real live provider integrations for G3 must be explicitly configured
     throw new Error(
       `LIVE_PROVIDER_UNAVAILABLE: Real provider transport for ${kind} is not configured; fake transport is strictly forbidden in LIVE mode`,

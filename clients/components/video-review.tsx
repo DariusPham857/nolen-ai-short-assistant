@@ -295,6 +295,26 @@ export function VideoReviewModal({
                   )}
 
                   <div className="space-y-1 text-xs text-zinc-400 font-mono bg-zinc-900/60 p-3 rounded border border-zinc-800/80">
+                    {typeof currentAsset.metadata?.provenance === 'string' && (
+                      <p>
+                        Provenance:{' '}
+                        <span className="text-zinc-200">{currentAsset.metadata.provenance}</span>
+                        {typeof currentAsset.metadata?.provider === 'string' && (
+                          <span className="ml-2 text-zinc-400">({currentAsset.metadata.provider})</span>
+                        )}
+                      </p>
+                    )}
+                    {typeof currentAsset.metadata?.startFrameProvenance === 'string' && (
+                      <p>
+                        Start frame:{' '}
+                        <span className="text-amber-300">{currentAsset.metadata.startFrameProvenance}</span>
+                        {typeof currentAsset.metadata?.startFrameSha256 === 'string' && (
+                          <span className="ml-2 text-zinc-500">
+                            ({currentAsset.metadata.startFrameSha256.slice(0, 12)}…)
+                          </span>
+                        )}
+                      </p>
+                    )}
                     <p>
                       SHA-256:{' '}
                       <span className="text-zinc-200">

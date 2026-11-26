@@ -27,6 +27,8 @@ import {
 import { relayOne, type BossContract } from "../financial/outbox.js";
 import { recoverStaleSubmissions } from "../dispatch/service.js";
 import { completeReplayAttempt, handleUnsupportedKindAttempt } from "../dispatch/completion.js";
+import { completeLocalPanZoomAttempt } from "../dispatch/local-completion.js";
+import { pgClient } from "../db/index.js";
 import { ApiFailure } from "../http/errors.js";
 
 const env = getEnv();
@@ -165,6 +167,48 @@ export async function startWorker(options: WorkerOptions = {}): Promise<RunningW
           throw new ApiFailure(400, 'JOB_IDENTITY_MISMATCH', `Job ID ${job.id} does not match attemptId ${attemptId}`);
         }
         await tracker.track(handleUnsupportedKindAttempt(attemptId, 'ASSEMBLY'));
+      }
+    });
+
+    // LIVE deterministic local generation queue (LP-001: LOCAL_PAN_ZOOM only; remote LIVE providers fail closed)
+    await boss.work('live:generation:dispatch', async (jobs: unknown) => {
+      for (const job of normalizeJobs(jobs)) {
+        const payload = job.data as { request?: { attemptId?: string; provider?: string } } | undefined;
+        const attemptId = payload?.request?.attemptId ?? job.id;
+        if (job.id && job.id !== attemptId) {
+          throw new ApiFailure(400, 'JOB_IDENTITY_MISMATCH', `Job ID ${job.id} does not match attemptId ${attemptId}`);
+        }
+        const provider = payload?.request?.provider;
+        if (provider && provider !== 'LOCAL_PAN_ZOOM') {
+          await tracker.track((async () => {
+            await pgClient.begin(async tx => {
+              const [att] = await tx<{ state: string }[]>`
+                SELECT state FROM attempts WHERE id = ${attemptId} FOR UPDATE
+              `;
+              if (att && !['SUCCEEDED', 'FAILED', 'CANCELED'].includes(att.state)) {
+                await tx`
+                  UPDATE attempts
+                  SET state = 'FAILED'
+                  WHERE id = ${attemptId} AND state IN ('QUEUED', 'SUBMITTED', 'RUNNING')
+                `;
+                await tx`
+                  UPDATE outbound_dispatches
+                  SET state = 'FAILED', updated_at = now()
+                  WHERE attempt_id = ${attemptId} AND state NOT IN ('SUCCEEDED', 'FAILED')
+                `;
+              }
+              await tx`
+                UPDATE dispatch_outbox
+                SET status = 'DELIVERED',
+                    enqueue_outcome = 'WORKER_CONFIRMED',
+                    delivered_at = COALESCE(delivered_at, now())
+                WHERE attempt_id = ${attemptId}
+              `;
+            });
+          })());
+          continue;
+        }
+        await tracker.track(completeLocalPanZoomAttempt(attemptId));
       }
     });
   }
