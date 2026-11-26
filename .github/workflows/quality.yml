@@ -52,17 +52,39 @@ jobs:
       - run: pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - name: QG-EVIDENCE production browser flows
-        run: pnpm test:e2e
+        env:
+          STORAGE_BASE_PATH: ${{ runner.temp }}/nolen-e2e-storage
+        run: |
+          # LP-AT-07 needs the real worker and the same media root as Playwright's web server.
+          node servers/dist/worker/index.js > "$RUNNER_TEMP/nolen-e2e-worker.log" 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true; wait "$worker_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/nolen-e2e-worker.log"
+              exit 1
+            fi
+            if grep -Fq '[worker] Ready and waiting for jobs.' "$RUNNER_TEMP/nolen-e2e-worker.log"; then
+              pnpm test:e2e
+              exit $?
+            fi
+            sleep 0.5
+          done
+          cat "$RUNNER_TEMP/nolen-e2e-worker.log"
+          echo 'Worker readiness timed out'
+          exit 1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: film-e2e-evidence
-          path: test-results/
+          path: |
+            test-results/
+            ${{ runner.temp }}/nolen-e2e-worker.log
       - name: Evidence scope
         if: always()
         run: |
           echo 'FC-001 create/read, SP-001 fixture/manual Story Approval, and FI-001 Financial Core checks. See individual step results.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Paid provider submission, provider-specific exactly-once, generation/media, VIDEO_DISPATCH validation and benchmark export: NOT_IMPLEMENTED.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'LP-AT-07 covers REPLAY keyframes and LIVE LOCAL_PAN_ZOOM media. Paid provider submission, provider-specific exactly-once, VIDEO_DISPATCH validation and benchmark export remain outside this evidence.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Missing/skipped checks are not PASS; no G0–G5 release acceptance or branch protection claimed.' >> "$GITHUB_STEP_SUMMARY"
   compose:
     runs-on: ubuntu-latest
