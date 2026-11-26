@@ -75,3 +75,94 @@ test('5xx after Story commit retains the same key and payload until a definite r
   await page.getByRole('button',{name:'Retry same request',exact:true}).click();await expect(page.getByRole('button',{name:'Validate story',exact:true})).toBeEnabled();expect(replayKey).toBe(key);
   const board=await(await page.request.get(`/api/films/${id}/storyboard`)).json() as Storyboard;expect(board.history).toHaveLength(1);
 });
+
+test('Gemini proposal loads LIVE_LLM provenance, preserves draft on error, survives reload, marks findings stale on edit, and saves without auto-approve (FP-AT-05)',async({page})=>{
+  const id=await open(page);
+  // Start manual plan and save so we have a baseline, then edit or start fresh
+  await page.getByRole('button',{name:'Start manual plan',exact:true}).click();
+  await page.getByLabel('Shot prompt',{exact:true}).fill('Draft before Gemini error');
+
+  // Generate button is locked when dirty
+  await expect(page.getByRole('button',{name:'Generate story with Gemini',exact:true})).toBeDisabled();
+  await save(page);
+  await expect(page.getByRole('button',{name:'Generate story with Gemini',exact:true})).toBeEnabled();
+
+  // Error preserves existing saved/loaded draft
+  await page.route('**/storyboard/plan-proposals',async route=>{
+    const body=route.request().postDataJSON() as {mode?:string};
+    expect(body.mode).toBe('GEMINI_FREE_PLANNER');
+    await route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({error:{code:'FREE_PLANNER_BILLING_UNATTESTED',message:'Attestation required',requestId:'test-only'}})});
+  });
+  await page.getByRole('button',{name:'Generate story with Gemini',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'Attestation required'})).toContainText('Attestation required');
+  await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Draft before Gemini error');
+  await page.unroute('**/storyboard/plan-proposals');
+
+  // Successful Gemini proposal
+  await page.route('**/storyboard/plan-proposals',async route=>{
+    await route.fulfill({
+      status:200,
+      contentType:'application/json',
+      body:JSON.stringify({
+        provenance:{source:'LIVE_LLM',model:'gemini-3.5-flash-lite',liveInference:true},
+        content:canonicalStory(),
+        findings:[{fingerprint:'a'.repeat(64),code:'TARGET_DURATION',severity:'WARNING',path:'duration',message:'Total 45s sample finding',waivable:false}],
+      }),
+    });
+  });
+  await page.getByRole('button',{name:'Generate story with Gemini',exact:true}).click();
+  await expect(page.getByTestId('proposal-banner')).toContainText('LIVE_LLM proposal · gemini-3.5-flash-lite · liveInference: true');
+  await expect(page.getByTestId('proposal-banner')).toContainText('TARGET_DURATION');
+  await page.unroute('**/storyboard/plan-proposals');
+
+  // Survives reload
+  await page.reload();
+  await expect(page.getByTestId('proposal-banner')).toContainText('LIVE_LLM proposal · gemini-3.5-flash-lite · liveInference: true');
+  await expect(page.getByTestId('proposal-banner')).toContainText('TARGET_DURATION');
+
+  // Editing marks findings stale and locks Gemini button
+  await page.getByLabel('Shot prompt',{exact:true}).fill('Edited Gemini shot prompt');
+  await expect(page.getByTestId('proposal-banner')).toContainText('stale (edited since proposal)');
+  await expect(page.getByRole('button',{name:'Generate story with Gemini',exact:true})).toBeDisabled();
+
+  // Saving sends clean saveStorySchema without auto-approve and clears proposal banner
+  await save(page);
+  await expect(page.getByTestId('proposal-banner')).toHaveCount(0);
+  await expect(page.getByTestId('story-state')).toHaveText('DRAFT');
+  const board=await(await page.request.get(`/api/films/${id}/storyboard`)).json() as Storyboard;
+  expect(board.history).toHaveLength(2);
+});
+
+test('Gemini proposal locks workspace with storageBlocked when sessionStorage.setItem fails (FP-AT-05b)',async({page})=>{
+  await open(page);
+  await page.getByRole('button',{name:'Start manual plan',exact:true}).click();
+  await page.getByLabel('Shot prompt',{exact:true}).fill('Saved before quota error');
+  await save(page);
+
+  await page.route('**/storyboard/plan-proposals',async route=>{
+    await route.fulfill({
+      status:200,
+      contentType:'application/json',
+      body:JSON.stringify({
+        provenance:{source:'LIVE_LLM',model:'gemini-3.5-flash-lite',liveInference:true},
+        content:canonicalStory(),
+        findings:[],
+      }),
+    });
+  });
+
+  await page.evaluate(()=>{
+    const orig=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(k:string,v:string){
+      if(k.endsWith('-draft'))throw new DOMException('Quota exceeded','QuotaExceededError');
+      return orig.call(this,k,v);
+    };
+  });
+
+  await page.getByRole('button',{name:'Generate story with Gemini',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'Tab storage is unavailable. Restore storage before sending changes.'})).toContainText('Tab storage is unavailable. Restore storage before sending changes.');
+  await expect(page.getByRole('button',{name:'Discard local state',exact:true})).toBeEnabled();
+  await expect(page.getByLabel('Shot prompt',{exact:true})).toBeDisabled();
+  await expect(page.getByLabel('Shot prompt',{exact:true})).toHaveValue('Saved before quota error');
+  await page.unroute('**/storyboard/plan-proposals');
+});
