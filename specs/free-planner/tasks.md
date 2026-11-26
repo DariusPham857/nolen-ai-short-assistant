@@ -1,6 +1,6 @@
 # FREE-PLAN-01 tasks
 
-Status: IMPLEMENTED_PENDING_SANDBOX_INTEGRATION_AND_LIVE_SMOKE
+Status: CI_VERIFIED_PENDING_LIVE_SMOKE
 Source: [spec](spec.md)
 
 ## Tasks
@@ -8,10 +8,10 @@ Source: [spec](spec.md)
 | Task | Tier | Scope & Dependency | Goal / Deliverable | Verification / Acceptance |
 |---|---|---|---|---|
 | FP-00 | R2 | REQUIRED | Create spec, tasks, AMDD sequence, roadmap link (`specs/README.md`); preserve `LP-02` gap note | `pnpm check:evidence` (`PASS`: 38 engineering documents) |
-| FP-01 | R1 | REQUIRED (depends on FP-00) | `planProposalRequestSchema`, `storyProposalV2Schema`, `proposalToStoryContentV2`, `storyDraftEnvelopeSchema`, snapshot/re-read concurrency guard | `packages/contracts/src/story.test.ts` (`PASS`, 22/22); PG16 barrier `free-planner.integration.test.ts` (`BLOCKED` in sandbox: `EACCES 127.0.0.1:5432`) |
+| FP-01 | R1 | REQUIRED (depends on FP-00) | `planProposalRequestSchema`, `storyProposalV2Schema`, `proposalToStoryContentV2`, `storyDraftEnvelopeSchema`, snapshot/re-read concurrency guard | Contracts suite `PASS`, 22/22; PG16 barrier `free-planner.integration.test.ts` `PASS` at `3d5ad01` (CI evidence below) |
 | FP-02a | R0 | REQUIRED (depends on FP-00) | Billing attestation guard (`=== "true"`), pinned model guard, `pnpm planner:preflight` | `servers/src/stories/free-planner.test.ts` (`PASS`, 5/5) |
 | FP-02b | R1 | REQUIRED (depends on FP-01, FP-02a) | Gemini native `fetch` adapter, 512 KiB stream cap, error mapping, pure validator findings | `servers/src/stories/free-planner.test.ts` (`PASS`, 5/5) |
-| FP-03 | R1 | REQUIRED (depends on FP-01, FP-02b) | Storyboard `Generate story with Gemini` UI, versioned draft envelope, stale findings | `clients/components/storyboard.tsx` (`typecheck` & `lint` `PASS`); `tests/e2e/story.spec.ts` (`FP-AT-05` added, `BLOCKED` in sandbox without local server/DB) |
+| FP-03 | R1 | REQUIRED (depends on FP-01, FP-02b) | Storyboard `Generate story with Gemini` UI, versioned draft envelope, stale findings | `typecheck` & `lint` `PASS`; production browser suite `PASS`, 19/19, including `FP-AT-05` / `FP-AT-05b` at `3d5ad01` (CI evidence below) |
 | FP-04 | R1 | REQUIRED (depends on FP-01..FP-03) | Quality gates, evidence checks, opt-in live smoke test | `typecheck` `PASS`, `lint` `PASS`, `check:evidence` `PASS`; `FP-AT-06` live smoke test `NOT_IMPLEMENTED` (runtime integration unverified) |
 
 ### Test-First Evidence (R0 / R1)
@@ -39,6 +39,15 @@ Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
   - [tests/e2e/story.spec.ts](../../tests/e2e/story.spec.ts) (`FP-AT-05`)
 - **Limits & Blockers**:
   - Fake transport tests (`free-planner.test.ts`) verify the wire contract only, not live Google API connectivity.
-  - PG16 barrier test (`free-planner.integration.test.ts`) and Playwright E2E (`tests/e2e/story.spec.ts`) were blocked in the sandbox (`EACCES 127.0.0.1:5432`) and must be run against local PostgreSQL 16 + Next.js server outside the sandbox.
+  - Earlier local sandbox PG16/E2E access failures are superseded for commit `3d5ad01` by the CI evidence below; no local runtime success is claimed.
   - Opt-in live smoke test (`FP-AT-06`) was not executed: **runtime integration chưa xác minh**.
   - Historical `LP-02` behavioral RED gap in [local-pan-zoom/tasks.md](../local-pan-zoom/tasks.md) remains open and is not exempted by `FREE-PLAN-01`.
+
+### CI repair verification — 2026-11-26
+- **Scope**: REQUIRED R2 test-fixture/locator repairs for `FP-AT-04`, `FP-AT-05` and `FP-AT-05b`; no production behavior or public interface change.
+- **Changes**: `dbfcc00` uses a bare Film fixture for the mid-flight deletion barrier, preserving production financial FK/append-only guards. `3d5ad01` filters both E2E alert locators by the expected error message, excluding Next.js route announcements while retaining content assertions.
+- **Failure evidence**: [previous PR job](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/45780709563/job/139775184200) passed PG16, then failed both E2E assertions because `getByRole('alert')` resolved to the application error and `__next-route-announcer__`. This is test-repair evidence, not behavioral TDD RED.
+- **Verified commit**: `3d5ad01b37b23a166ab91eb09ddaa399e7050600`. Both [pull-request run](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/45781841183) and [push run](https://github.com/DariusPham857/nolen-ai-short-assistant/actions/runs/45781834616) completed successfully.
+- **Actual PR film-job results**: build, lint, typecheck, guardrails, runtime boundary, evidence checks, migrations and seed `PASS`; contracts 22/22, server unit 88/88, real PostgreSQL 16 integration 102/102 (including the free-planner barrier), production Playwright 19/19 `PASS`. The Compose job also passed topology and production-image media validation.
+- **Review**: Both changed locators retain role and expected message checks, matching the existing conflict-alert pattern. No assertion or financial constraint was removed.
+- **Next dependency**: `FP-04` remains open for opt-in `FP-AT-06` live smoke implementation/execution. Browser transport stubs and CI success do not establish real Gemini connectivity, no-billing eligibility, owner sign-off, or release acceptance.
