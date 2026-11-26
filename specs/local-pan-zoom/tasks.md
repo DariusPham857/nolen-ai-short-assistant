@@ -12,6 +12,7 @@ Source: [spec](spec.md)
 | LP-02 | R0 | REQUIRED | `ffmpeg-pan-zoom.ts` renderer, `ffprobe` verification, pre-render terminal check, `completeLocalPanZoomAttempt()`, handled failure cleanup/settlement vs crash recovery | Unit renderer 8/8 + container media 5/5 + PG16 local completion 6/6 PASS at `8a02e26`; historical behavioral RED was not recorded | BLOCKED (test-first evidence) |
 | LP-03 | R0/R1 | REQUIRED | `admitAttempt()`/`resolveAuthoritativeMediaTemplate()` remote-LIVE block + `LOCAL_PAN_ZOOM` unlock, `worker/index.ts` `live:generation:dispatch`, `storyboard.tsx` + `video-review.tsx` LIVE rate-card filter & lineage badge | Full PG16 101/101 + Compose E2E 11/11 + host Film E2E 6/6 PASS at `8a02e26`; whole-feature workflow completion remains blocked by LP-02 | VERIFIED; pending sign-off |
 | LP-04 | R2 | REQUIRED (review follow-up) | Reverify `8a02e26` on isolated PG16/Compose and host browser environments; separate historical evidence from current checks and record the RED gap without reconstruction | Current-head verification matrix and completion limitation below; documentation/evidence checks | DONE |
+| LP-05 | R2 | REQUIRED (CI follow-up) | Give the two-render real-media test an explicit 15-second Vitest timeout; preserve assertions, renderer limits and other test timeouts | Docker full unit/media suite: contracts 21/21 + server 83/83; server typecheck/lint; evidence checks | DONE |
 
 ### LP-00 Docker Image Spike Evidence (2026-11-25)
 
@@ -68,6 +69,14 @@ Source: [spec](spec.md)
 - **Windows Film teardown:** all six tests reported `ok`, but the test-owned Next process remained alive during Playwright web-server teardown. Verified its process identity/parent and stopped only that Next process; Playwright then exited 0 with `6 passed`. Assertions passed; unattended Windows teardown is not claimed verified.
 - **Cleanup:** removed only this follow-up's Compose project/volumes and temporary host PostgreSQL container. Existing unrelated Docker services and the pre-existing untracked `QUICKSTART.md` / `scripts/quick_start.ps1` were preserved. Diagnostic logs remain locally under `%TEMP%/lp001-verify-*.log`.
 - **Completion limitation:** [ENG-DEC-002](../../docs/development/ENG-DEC-002.md) and the [test-first completion guard](../../.agents/rules/risk-based-tdd-amdd.md) prohibit marking applicable R0/R1 work DONE without genuine RED evidence. LP-02 therefore remains BLOCKED despite current runtime PASS. No retrospective RED, owner acceptance, policy waiver or accepted debt is inferred from verification authorization. Resolving that historical process gap requires a separate explicit owner decision under the canonical workflow; this documentation follow-up does not alter that policy.
+
+### LP-05 real-media CI timeout (2026-11-26)
+
+- **Trigger:** owner supplied a CI failure for `ffmpeg-pan-zoom.media.test.ts` / `LP-AT-01`: the two-render test exceeded Vitest's default 5-second timeout at approximately 5.034 seconds (82 server tests passed, one failed). This is supplied CI evidence, not a locally reproduced behavioral RED.
+- **Scope / risk:** REQUIRED, R2 test-harness timing only. `servers/src/providers/ffmpeg-pan-zoom.media.test.ts` now passes `15_000` to this single `it()` because it performs two real 1080p encodes. Output assertions, test discovery, renderer subprocess timeout/kill safeguards and other tests are unchanged. No historical LP-02 RED evidence is inferred from this fix.
+- **Verification:** `docker run --rm --mount 'type=bind,source=D:\nolen-ai-short-assistant\servers\src\providers\ffmpeg-pan-zoom.media.test.ts,target=/app/servers/src/providers/ffmpeg-pan-zoom.media.test.ts,readonly' nolen-fc001:local sh -c 'env -u STORAGE_BASE_PATH NODE_ENV=test pnpm test'`: PASS, contracts 21/21 and server 83/83, including real media 5/5; `LP-AT-01` took 2.676 seconds locally while the full suite ran concurrently. The read-only mount ensures the modified test, rather than the older test baked into the image, was executed.
+- **Checks:** `pnpm --filter @nolen/server typecheck`, `pnpm --filter @nolen/server lint`, `pnpm test:evidence`, `pnpm check:evidence` and `git diff --check`: PASS. Log: `%TEMP%/lp001-media-timeout-unit.log`.
+- **Limits / next step:** no production behavior changed, so PG16/E2E were not repeated for this timeout-only follow-up. Local PASS does not claim a hosted CI result; assess the next workflow run separately. Revert the explicit test timeout to roll back this follow-up.
 
 ## Handoff
 

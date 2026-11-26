@@ -32,6 +32,7 @@ describe('renderLocalPanZoomMp4 (real ffmpeg/ffprobe)', () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
+  // Two real 1080p encodes need headroom on shared CI runners.
   it('renders 1080x1920 30fps yuv420p h264 MP4 from 720x1280 and square 320x320 START_FRAMEs without audio streams (LP-AT-01)', async () => {
     const portraitPng = genPng('720x1280');
     const portraitSha = createHash('sha256').update(portraitPng).digest('hex');
@@ -83,7 +84,7 @@ describe('renderLocalPanZoomMp4 (real ffmpeg/ffprobe)', () => {
 
     const tempFiles = await fs.readdir(storage.resolveDir('temp'));
     expect(tempFiles).toEqual([]);
-  });
+  }, 15_000);
 
   it('rejects corrupt non-image bytes with LOCAL_RENDER_FAILED and cleans up temp files (LP-AT-08)', async () => {
     const junk = Buffer.from('not-a-valid-png-payload');
