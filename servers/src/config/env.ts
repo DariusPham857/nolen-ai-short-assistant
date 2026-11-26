@@ -30,6 +30,8 @@ const envSchema = z.object({
 
   // Provider API keys — required only in LIVE mode
   GEMINI_API_KEY: z.string().optional(),
+  GEMINI_NO_BILLING_ATTESTED: z.string().optional(),
+  GEMINI_FREE_PLANNER_MODEL: z.string().optional(),
   RUNWAY_API_KEY: z.string().optional(),
   FAL_API_KEY: z.string().optional(),
 

@@ -7,6 +7,8 @@ import {
   expectedSchema,
   filmDtoSchema,
   formatMicros,
+  planProposalResponseSchema,
+  parseStoryDraftEnvelope,
   saveStorySchema,
   storyContentSchema,
   upgradeBibleToV2,
@@ -18,6 +20,7 @@ import {
   type ShotSpec,
   type Storyboard,
   type StoryContent,
+  type StoryProposalMeta,
 } from '@nolen/contracts';
 import { Button } from './ui/button';
 import { Navigation } from './navigation';
@@ -95,7 +98,7 @@ export function StoryboardWorkspace({filmId}:{filmId:string}){
   const [budget,setBudget]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [dirty,setDirty]=useState(false);
   const [pending,setPending]=useState<Pending|null>(null);const [pendingAttempt,setPendingAttempt]=useState<PendingAttempt|null>(null);
   const [storageBlocked,setStorageBlocked]=useState(false);const [historical,setHistorical]=useState(false);
-  const [selected,setSelected]=useState({scene:0,shot:0});const [proposal,setProposal]=useState(false);
+  const [selected,setSelected]=useState({scene:0,shot:0});const [proposalMeta,setProposalMeta]=useState<StoryProposalMeta|null>(null);
   const [keyframeModalOpen,setKeyframeModalOpen]=useState(false);
   const [videoModalOpen,setVideoModalOpen]=useState(false);
 type RateCardSummary = {
@@ -199,12 +202,12 @@ function pickRateCardForMode(
     const response=await fetch(`${base}/storyboard${revisionId?`/revisions/${revisionId}`:''}`,{cache:'no-store'});
     if(response.status===401){router.push(`/unlock?next=/films/${filmId}/storyboard`);return;}
     if(!response.ok)throw new Error(await errorMessage(response));
-    const b=await response.json() as Storyboard;setBoard(b);setHistorical(Boolean(revisionId));setSelected({scene:0,shot:0});setProposal(false);
+    const b=await response.json() as Storyboard;setBoard(b);setHistorical(Boolean(revisionId));setSelected({scene:0,shot:0});
     const r=b.revision;let next=r?structuredClone(r.content):null;
     if(next&&r)for(const s of next.scenes.flatMap(s=>s.shots))s.expectedShotRevisionId=r.shotRevisions[s.id!].id;
-    let expected={expectedStoryRevisionId:b.active?.id??null,expectedStateVersion:b.active?.stateVersion??0};let restored=false;
-    if(restore){const raw=sessionStorage.getItem(`${slot}-draft`);if(raw){const parsed=saveStorySchema.parse(JSON.parse(raw) as unknown);next=parsed.content;expected=expectedSchema.parse({expectedStoryRevisionId:parsed.expectedStoryRevisionId,expectedStateVersion:parsed.expectedStateVersion});restored=true;}}
-    setContent(next);setToken(expected);setDirty(restored);
+    let expected={expectedStoryRevisionId:b.active?.id??null,expectedStateVersion:b.active?.stateVersion??0};let restored=false;let nextMeta:StoryProposalMeta|null=null;
+    if(restore){const raw=sessionStorage.getItem(`${slot}-draft`);if(raw){const parsed=parseStoryDraftEnvelope(raw);next=parsed.content;expected=parsed.expected;nextMeta=parsed.proposalMeta;restored=true;}}
+    setContent(next);setToken(expected);setDirty(restored);setProposalMeta(nextMeta);
     if(next) {
       const allShots = next.scenes.flatMap(s => s.shots);
       void refreshShotMedia(allShots);
@@ -229,9 +232,14 @@ function pickRateCardForMode(
   })();},[filmId,attemptSlot]);
 
   /** Draft persistence happens before the next network operation, preserving unsaved work on reload. */
+  function persistDraft(nextToken: Expected, nextContent: StoryContent, nextMeta: StoryProposalMeta | null) {
+    sessionStorage.setItem(`${slot}-draft`, JSON.stringify({ draftVersion: 1, ...nextToken, content: nextContent, proposalMeta: nextMeta }));
+  }
   function edit(change:(draft:StoryContent)=>void){
     if(!content)return;const next=structuredClone(content);change(next);setContent(next);setDirty(true);
-    try{sessionStorage.setItem(`${slot}-draft`,JSON.stringify({...token,content:next}));}catch{setStorageBlocked(true);setError('Tab storage is unavailable. Restore storage before sending changes.');}
+    const nextMeta = proposalMeta ? { ...proposalMeta, findingsStale: true } : null;
+    if (nextMeta) setProposalMeta(nextMeta);
+    try{persistDraft(token,next,nextMeta);}catch{setStorageBlocked(true);setError('Tab storage is unavailable. Restore storage before sending changes.');}
   }
   async function send(p:Pending){
     setBusy(true);setError('');
@@ -248,13 +256,21 @@ function pickRateCardForMode(
     const p={key:crypto.randomUUID(),route,body};
     try{sessionStorage.setItem(`${slot}-pending`,JSON.stringify(p));setPending(p);void send(p);}catch{setStorageBlocked(true);setError('Cannot persist retry identity; nothing was sent.');}
   }
-  async function fixture(){
+  async function requestProposal(mode: 'FIXTURE' | 'GEMINI_FREE_PLANNER'){
     setBusy(true);setError('');try{
-      const response=await fetch(`${base}/storyboard/plan-proposals`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(token)});
+      const response=await fetch(`${base}/storyboard/plan-proposals`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...token,mode})});
       if(!response.ok)throw new Error(await errorMessage(response));
-      const result=await response.json() as {content:unknown};const next=storyContentSchema.parse(result.content);setContent(next);setDirty(true);setProposal(true);setSelected({scene:0,shot:0});
-      sessionStorage.setItem(`${slot}-draft`,JSON.stringify({...token,content:next}));
-    }catch(e){setError(e instanceof Error?e.message:'Unable to load fixture');}finally{setBusy(false);}
+      const result=planProposalResponseSchema.parse(await response.json());
+      const nextMeta: StoryProposalMeta = { provenance: result.provenance, findings: result.findings ?? [], findingsStale: false };
+      try {
+        persistDraft(token, result.content, nextMeta);
+      } catch {
+        setStorageBlocked(true);
+        setError('Tab storage is unavailable. Restore storage before sending changes.');
+        return;
+      }
+      setContent(result.content);setDirty(true);setProposalMeta(nextMeta);setSelected({scene:0,shot:0});
+    }catch(e){setError(e instanceof Error?e.message:(mode==='GEMINI_FREE_PLANNER'?'Unable to generate Gemini proposal':'Unable to load fixture'));}finally{setBusy(false);}
   }
   async function revalidate(){
     setBusy(true);setError('');try{
@@ -575,7 +591,8 @@ function pickRateCardForMode(
     {(pending||storageBlocked)&&<div className="my-4 flex gap-3"><Button disabled={busy||!pending} onClick={()=>pending&&void send(pending)}>Retry same request</Button><Button variant="outline" onClick={discard}>Discard local state</Button></div>}
     <div className="my-4 flex flex-wrap gap-2">
       {!content&&<Button disabled={disabled} onClick={()=>{const c=manualStory('Describe the story');setContent(c);setDirty(true);sessionStorage.setItem(`${slot}-draft`,JSON.stringify({...token,content:c}));}}>Start manual plan</Button>}
-      <Button variant="outline" disabled={disabled||dirty} onClick={()=>void fixture()}>Load 45s fixture proposal</Button>
+      <Button variant="outline" disabled={disabled||dirty} onClick={()=>void requestProposal('FIXTURE')}>Load 45s fixture proposal</Button>
+      <Button variant="outline" disabled={disabled||dirty} onClick={()=>void requestProposal('GEMINI_FREE_PLANNER')}>Generate story with Gemini</Button>
       <Button disabled={disabled||!dirty||!content} onClick={()=>{try{mutate('revisions',saveStorySchema.parse({...token,content}));}catch{setError('Check required fields and story limits before saving.');}}}>Save new revision</Button>
       <Button variant="outline" disabled={disabled||dirty||!board?.active} onClick={()=>void revalidate()}>Validate story</Button>
       {board?.active?.state==='DRAFT'&&<Button disabled={disabled||dirty} onClick={()=>mutate('mark-planned',token)}>Mark planned</Button>}
@@ -583,7 +600,16 @@ function pickRateCardForMode(
       {board?.active?.state==='IN_REVIEW'&&<Button disabled={disabled||dirty} onClick={()=>{if(window.confirm(`Approve revision ${board.active!.revisionNo}? This approves story intent; video dispatch still requires its own gates.`))mutate('approve',token);}}>Approve story</Button>}
       <Button variant="outline" disabled={busy||Boolean(pending)} onClick={()=>{if(!dirty||window.confirm('Discard unsaved edits and reload current revision?')){sessionStorage.removeItem(`${slot}-draft`);void load().catch(()=>setError('Reload failed.'));}}}>Reload current revision</Button>
     </div>
-    {proposal&&<p className="my-3 text-amber-300">FIXTURE proposal — The Last Light, 45s / 8 shots. No LIVE AI inference. Review before saving.</p>}
+    {proposalMeta?.provenance.source==='FIXTURE'&&<p className="my-3 text-amber-300">FIXTURE proposal — The Last Light, 45s / 8 shots. No LIVE AI inference. Review before saving.</p>}
+    {proposalMeta?.provenance.source==='LIVE_LLM'&&<div data-testid="proposal-banner" className="my-3 rounded border border-sky-800 bg-sky-950/40 p-3 text-sm text-sky-200 space-y-2">
+      <p>LIVE_LLM proposal · {proposalMeta.provenance.model} · liveInference: true. Review, edit, and save before story approval.</p>
+      {proposalMeta.findings.length>0&&<div className="text-xs space-y-1">
+        <p className="font-semibold text-amber-300">Proposal continuity findings ({proposalMeta.findings.length}){proposalMeta.findingsStale?' · stale (edited since proposal)':''}:</p>
+        <ul className="list-disc pl-5 space-y-0.5 text-zinc-300">
+          {proposalMeta.findings.map(f=><li key={f.fingerprint}>[{f.severity}] {f.code}: {f.message}</li>)}
+        </ul>
+      </div>}
+    </div>}
     {content&&<fieldset disabled={disabled} className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)_minmax(280px,1fr)]">
       <legend className="sr-only">Storyboard editor</legend>
       <aside className="space-y-4 border-r border-zinc-800 pr-4"><h2 className="font-semibold">Scenes and shots</h2>

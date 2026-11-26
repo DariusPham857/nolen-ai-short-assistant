@@ -90,6 +90,135 @@ export const storyContentSchema = z.object({
 });
 
 export const expectedSchema = z.object({expectedStoryRevisionId:z.string().uuid().nullable(),expectedStateVersion:z.number().int().min(0)}).strict();
+export const planProposalModeSchema = z.enum(['FIXTURE', 'GEMINI_FREE_PLANNER']);
+export const planProposalRequestSchema = expectedSchema.extend({ mode: planProposalModeSchema.default('FIXTURE') }).strict();
+export const proposalProvenanceSchema = z.union([
+  z.object({ source: z.literal('FIXTURE'), fixtureId: z.string(), liveInference: z.literal(false) }).strict(),
+  z.object({ source: z.literal('LIVE_LLM'), model: z.string(), liveInference: z.literal(true) }).strict(),
+]);
+export type ProposalProvenance = z.infer<typeof proposalProvenanceSchema>;
+export const findingSchema = z.object({
+  fingerprint: z.string(),
+  code: z.string(),
+  severity: z.enum(['ERROR', 'WARNING']),
+  path: z.string(),
+  message: z.string(),
+  waivable: z.boolean(),
+}).strict();
+export const planProposalResponseSchema = z.object({
+  provenance: proposalProvenanceSchema,
+  content: storyContentSchema,
+  findings: z.array(findingSchema).optional(),
+}).strict();
+export const storyDraftEnvelopeSchema = expectedSchema.extend({
+  draftVersion: z.literal(1),
+  content: storyContentSchema,
+  proposalMeta: z.object({
+    provenance: proposalProvenanceSchema,
+    findings: z.array(findingSchema),
+    findingsStale: z.boolean(),
+  }).nullable(),
+}).strict();
+export type StoryProposalMeta = NonNullable<z.infer<typeof storyDraftEnvelopeSchema>['proposalMeta']>;
+export function parseStoryDraftEnvelope(raw: string): {
+  expected: Expected;
+  content: StoryContent;
+  proposalMeta: StoryProposalMeta | null;
+} {
+  const json = JSON.parse(raw) as unknown;
+  if (json && typeof json === 'object' && 'draftVersion' in json) {
+    const parsed = storyDraftEnvelopeSchema.parse(json);
+    return {
+      expected: { expectedStoryRevisionId: parsed.expectedStoryRevisionId, expectedStateVersion: parsed.expectedStateVersion },
+      content: parsed.content,
+      proposalMeta: parsed.proposalMeta,
+    };
+  }
+  const legacy = saveStorySchema.parse(json);
+  return {
+    expected: { expectedStoryRevisionId: legacy.expectedStoryRevisionId, expectedStateVersion: legacy.expectedStateVersion },
+    content: legacy.content,
+    proposalMeta: null,
+  };
+}
+export const storyProposalV2Schema = z.object({
+  script: z.string().trim().min(1).max(20000),
+  storyBible: z.object({
+    schemaVersion: z.literal('2'),
+    narrative: text,
+    characters: z.array(definitionV1).max(32),
+    wardrobes: z.array(definitionV1).max(32),
+    props: z.array(definitionV1.extend({ hero: z.boolean().default(false) }).strict()).max(32),
+    locations: z.array(definitionV1).max(32),
+    styleRefs: z.array(definitionV1).max(32),
+  }).strict().superRefine((v, c) => {
+    for (const group of ['characters', 'wardrobes', 'props', 'locations', 'styleRefs'] as const) {
+      if (new Set(v[group].map(x => x.id)).size !== v[group].length) {
+        c.addIssue({ code: 'custom', path: [group], message: 'Duplicate Bible key' });
+      }
+    }
+  }),
+  scenes: z.array(z.object({
+    clientRef: key,
+    title: z.string().trim().min(1).max(255),
+    shots: z.array(z.object({
+      clientRef: key,
+      spec: z.object({
+        schemaVersion: z.literal('2'),
+        shotType: shotSpecBaseFields.shotType,
+        durationSeconds: shotSpecBaseFields.durationSeconds,
+        prompt: shotSpecBaseFields.prompt,
+        negativePrompt: shotSpecBaseFields.negativePrompt,
+        styleRefId: shotSpecBaseFields.styleRefId,
+        subjectIds: shotSpecBaseFields.subjectIds,
+        locationId: shotSpecBaseFields.locationId,
+        continuity: shotSpecBaseFields.continuity,
+        intendedTransitions: shotSpecBaseFields.intendedTransitions,
+        camera: z.object({ angle: cameraAngleSchema, framing: text, movement: text }).strict(),
+      }).strict(),
+    }).strict()).min(1).max(10),
+  }).strict()).min(1).max(10),
+}).strict().superRefine((v, c) => {
+  const shots = v.scenes.flatMap(s => s.shots);
+  if (shots.length > 10) c.addIssue({ code: 'custom', path: ['scenes'], message: 'At most ten shots' });
+  for (const [group, items] of [['scene', v.scenes], ['shot', shots]] as const) {
+    if (new Set(items.map(x => x.clientRef)).size !== items.length) {
+      c.addIssue({ code: 'custom', message: `Duplicate ${group} identity` });
+    }
+  }
+});
+export type StoryProposalV2 = z.infer<typeof storyProposalV2Schema>;
+
+/** Convert a strict StoryProposalV2 into StoryContentV2 by adding empty asset bindings and null overrides. */
+export function proposalToStoryContentV2(proposal: StoryProposalV2): StoryContentV2 {
+  const addEmptyBinding = <T extends { id: string; name: string; description: string }>(item: T) => ({
+    ...item,
+    referenceAssetIds: [] as string[],
+  });
+  return storyContentSchema.parse({
+    script: proposal.script,
+    storyBible: {
+      schemaVersion: '2',
+      narrative: proposal.storyBible.narrative,
+      characters: proposal.storyBible.characters.map(addEmptyBinding),
+      wardrobes: proposal.storyBible.wardrobes.map(addEmptyBinding),
+      props: proposal.storyBible.props.map(addEmptyBinding),
+      locations: proposal.storyBible.locations.map(addEmptyBinding),
+      styleRefs: proposal.storyBible.styleRefs.map(addEmptyBinding),
+    },
+    scenes: proposal.scenes.map(scene => ({
+      clientRef: scene.clientRef,
+      title: scene.title,
+      shots: scene.shots.map(shot => ({
+        clientRef: shot.clientRef,
+        spec: {
+          ...shot.spec,
+          keyframeOverride: null,
+        },
+      })),
+    })),
+  }) as StoryContentV2;
+}
 export const saveStorySchema = expectedSchema.extend({content:storyContentSchema}).strict();
 export const validateStorySchema = expectedSchema.extend({context:z.enum(['STORY_APPROVAL','VIDEO_DISPATCH']).default('STORY_APPROVAL')}).strict();
 export const waiverSchema = expectedSchema.extend({findingFingerprint:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict();
