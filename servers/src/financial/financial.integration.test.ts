@@ -7,7 +7,7 @@ import { pgClient } from '../db/index.js';
 import { migrateDatabase } from '../db/migrate.js';
 import { createFinancialApi } from '../http/financial-api.js';
 import { claimProviderSubmission, relayOne } from './outbox.js';
-import { auditFinancialProjection } from './repository.js';
+import { auditFinancialProjection, previewGeneration } from './repository.js';
 import { canonicalizePayload } from '../dispatch/service.js';
 import { fakeAssetProducer } from '../assets/repository.js';
 import { seedBaselineRateCards } from '../db/seed-rate-cards.js';
@@ -30,7 +30,7 @@ async function fixture(budget='100',rate='25',rateType:'FIXED_PER_REQUEST'|'PER_
       await tx`INSERT INTO story_approvals(id,story_revision_id,evidence) VALUES(${randomUUID()},${storyRevisionId},${JSON.stringify({storyRevisionId,contentHash:'fixture',dependencyHash:approvalDependency,ruleSetVersion,validationRunId,waiverIds:[],waiverSetHash:'fixture-waivers',actorId:'local-operator',approvedAt:new Date().toISOString(),decision:'APPROVED'})}::jsonb)`;
     }
     await tx`INSERT INTO rate_card_snapshots(id,provider,model,operation,rate_type,unit_price_usd_micros,effective_at,expires_at,source_ref)
-      VALUES(${rateCardSnapshotId},'LOCAL_PAN_ZOOM','test-model','TTS',${rateType},${rate},'2026-01-01','2027-01-01','test-only deterministic fixture')`;
+      VALUES(${rateCardSnapshotId},'LOCAL_PAN_ZOOM','test-model','TTS',${rateType},${rate},'2026-01-01','2027-01-01','LOCAL_VERIFIED test-only deterministic fixture')`;
   });
   return {filmId,storyRevisionId,rateCardSnapshotId};
 }
@@ -762,6 +762,157 @@ describe('FI-001 PostgreSQL 16 financial core',()=>{
     expect(cards.some(c => c.provider === 'RUNWAY' && c.operation === 'VIDEO')).toBe(true);
     expect(cards.some(c => c.provider === 'FAL_KLING' && c.operation === 'VIDEO')).toBe(true);
     expect(cards.some(c => c.provider === 'LOCAL_PAN_ZOOM' && c.operation === 'VIDEO')).toBe(true);
+  });
+
+  it('PD-05b.7: enforces strict provider-to-rate-card binding and credentials across both admission paths with zero-leak rollback', async () => {
+    const f = await fixture('1000000', '25');
+    const storyContent = canonicalStoryV2();
+    const shotSpec = storyContent.scenes[0].shots[0].spec;
+    const shotId = randomUUID();
+    const shotRevisionId = randomUUID();
+    const sceneId = randomUUID();
+
+    const remoteWithLocalCardId = randomUUID();
+    const remoteWithOtherCardId = randomUUID();
+    const remoteWithModeledCardId = randomUUID();
+    const localWithLiveCardId = randomUUID();
+    const validGeminiLiveCardId = randomUUID();
+    const validRunwayLiveCardId = randomUUID();
+    const remoteTtsLocalCardId = randomUUID();
+
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO scenes(id, film_id) VALUES(${sceneId}, ${f.filmId})`;
+      await tx`INSERT INTO story_revision_scenes(film_id, story_revision_id, scene_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, 1)`;
+      await tx`INSERT INTO shots(id, film_id) VALUES(${shotId}, ${f.filmId})`;
+      await tx`INSERT INTO shot_revisions(id, film_id, shot_id, spec, dependency_hash, policy)
+        VALUES(${shotRevisionId}, ${f.filmId}, ${shotId}, ${JSON.stringify(shotSpec)}::jsonb, 'dep-hash-pd05b7', '{"effectiveRequirement":"OPTIONAL"}'::jsonb)`;
+      await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
+        VALUES(${f.filmId}, ${f.storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
+
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${remoteWithLocalCardId}, 'GEMINI', 'gemini-3.1-flash-image', 'IMAGE', 'FIXED_PER_REQUEST', 67000, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED wrong pairing')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${remoteWithOtherCardId}, 'GEMINI', 'gemini-3.1-flash-image', 'IMAGE', 'FIXED_PER_REQUEST', 67000, '2026-01-01', '2027-01-01', 'OTHER unverified source')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${remoteWithModeledCardId}, 'GEMINI', 'gemini-3.1-flash-image', 'IMAGE', 'FIXED_PER_REQUEST', 67000, '2026-01-01', '2027-01-01', 'MODELED_ONLY illustration')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${localWithLiveCardId}, 'LOCAL_PAN_ZOOM', 'ffmpeg-pan-zoom', 'TTS', 'FIXED_PER_REQUEST', 0, '2026-01-01', '2027-01-01', 'LIVE_VERIFIED wrong pairing')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${remoteTtsLocalCardId}, 'GEMINI', 'gemini-tts', 'TTS', 'FIXED_PER_REQUEST', 1000, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED wrong pairing')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${validGeminiLiveCardId}, 'GEMINI', 'gemini-3.1-flash-image', 'IMAGE', 'FIXED_PER_REQUEST', 67000, '2026-01-01', '2027-01-01', 'LIVE_VERIFIED empirical 2026-11')`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${validRunwayLiveCardId}, 'RUNWAY', 'gen4_turbo', 'VIDEO', 'PER_SECOND', 50000, '2026-01-01', '2027-01-01', 'LIVE_VERIFIED empirical 2026-11')`;
+    });
+
+    const prevGeminiKey = process.env.GEMINI_API_KEY;
+    const prevRunwayKey = process.env.RUNWAY_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.RUNWAY_API_KEY;
+
+    try {
+      // Path 1 (Media): Remote with LOCAL_VERIFIED -> 422 RATE_CARD_PROVIDER_MISMATCH
+      const r1 = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        storyRevisionId: f.storyRevisionId,
+        shotRevisionId,
+        kind: 'IMAGE',
+        rateCardSnapshotId: remoteWithLocalCardId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+        expectedPreviewHash: '0'.repeat(64),
+      });
+      expect(r1.status).toBe(422);
+      expect(((await r1.json()) as { error?: { code: string } }).error?.code).toBe('RATE_CARD_PROVIDER_MISMATCH');
+
+      // Path 1 (Media): Remote with OTHER / MODELED_ONLY -> 422 UNVERIFIED_LIVE_RATE_CARD
+      for (const cardId of [remoteWithOtherCardId, remoteWithModeledCardId]) {
+        const r = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+          storyRevisionId: f.storyRevisionId,
+          shotRevisionId,
+          kind: 'IMAGE',
+          rateCardSnapshotId: cardId,
+          pricingUnits: 1,
+          executionMode: 'LIVE',
+          expectedPreviewHash: '0'.repeat(64),
+        });
+        expect(r.status).toBe(422);
+        expect(((await r.json()) as { error?: { code: string } }).error?.code).toBe('UNVERIFIED_LIVE_RATE_CARD');
+      }
+
+      // Path 2 (Non-media TTS): Remote with LOCAL_VERIFIED -> 422 RATE_CARD_PROVIDER_MISMATCH
+      const rTtsMismatch = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        storyRevisionId: f.storyRevisionId,
+        shotRevisionId: null,
+        kind: 'TTS',
+        rateCardSnapshotId: remoteTtsLocalCardId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+      });
+      expect(rTtsMismatch.status).toBe(422);
+      expect(((await rTtsMismatch.json()) as { error?: { code: string } }).error?.code).toBe('RATE_CARD_PROVIDER_MISMATCH');
+
+      // Path 2 (Non-media TTS): LOCAL_PAN_ZOOM without LOCAL_VERIFIED -> 422 UNVERIFIED_LIVE_RATE_CARD
+      const rLocalBad = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        storyRevisionId: f.storyRevisionId,
+        shotRevisionId: null,
+        kind: 'TTS',
+        rateCardSnapshotId: localWithLiveCardId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+      });
+      expect(rLocalBad.status).toBe(422);
+      expect(((await rLocalBad.json()) as { error?: { code: string } }).error?.code).toBe('UNVERIFIED_LIVE_RATE_CARD');
+
+      // Path 1 (Media): Valid LIVE_VERIFIED card without credentials -> 422 LIVE_CREDENTIALS_MISSING
+      const rNoCreds = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        storyRevisionId: f.storyRevisionId,
+        shotRevisionId,
+        kind: 'IMAGE',
+        rateCardSnapshotId: validGeminiLiveCardId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+        expectedPreviewHash: '0'.repeat(64),
+      });
+      expect(rNoCreds.status).toBe(422);
+      expect(((await rNoCreds.json()) as { error?: { code: string } }).error?.code).toBe('LIVE_CREDENTIALS_MISSING');
+
+      // Rollback invariant: ZERO reservation, ZERO attempts, ZERO outbox entries after rejections
+      const budgetAfterRejects = moneyProjectionSchema.parse(await (await request(`/api/films/${f.filmId}/budget`)).json());
+      expect(budgetAfterRejects.reservedOpenUsdMicros).toBe('0');
+      expect(await pgClient`SELECT id FROM attempts WHERE film_id = ${f.filmId}`).toHaveLength(0);
+      expect(await pgClient`SELECT o.id FROM dispatch_outbox o JOIN attempts a ON a.id = o.attempt_id WHERE a.film_id = ${f.filmId}`).toHaveLength(0);
+
+      // Valid LIVE_VERIFIED card + active credentials -> succeeds with PENDING billing & 67k reservation
+      process.env.GEMINI_API_KEY = 'test-live-gemini-key';
+      const previewJson = await previewGeneration(f.filmId, 'local-operator', {
+        storyRevisionId: f.storyRevisionId,
+        shotRevisionId,
+        kind: 'IMAGE',
+        rateCardSnapshotId: validGeminiLiveCardId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+      });
+
+      const admitRes = await request(`/api/films/${f.filmId}/attempts`, 'POST', {
+        storyRevisionId: f.storyRevisionId,
+        shotRevisionId,
+        kind: 'IMAGE',
+        rateCardSnapshotId: validGeminiLiveCardId,
+        pricingUnits: 1,
+        executionMode: 'LIVE',
+        expectedPreviewHash: previewJson.previewHash,
+      });
+      expect(admitRes.status).toBe(201);
+      const admitted = attemptReceiptSchema.parse(await admitRes.json());
+      expect(admitted.billingStatus).toBe('PENDING');
+      expect(admitted.reservationUsdMicros).toBe('67000');
+    } finally {
+      if (prevGeminiKey !== undefined) process.env.GEMINI_API_KEY = prevGeminiKey;
+      else delete process.env.GEMINI_API_KEY;
+      if (prevRunwayKey !== undefined) process.env.RUNWAY_API_KEY = prevRunwayKey;
+      else delete process.env.RUNWAY_API_KEY;
+    }
   });
 });
 

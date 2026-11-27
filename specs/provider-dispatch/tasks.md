@@ -1,6 +1,6 @@
 # PD-001 tasks
 
-Status: DRAFT
+Status: CORE_VERIFIED_PENDING_PAID_CANARY
 Source: [spec](spec.md)
 
 ## Tasks
@@ -17,7 +17,14 @@ Source: [spec](spec.md)
 | PD-05a.4 | R0 | REQUIRED | Idempotent completion service (mode-prefixed queue routing, deadlock-free pre-flight kind check, durable Asset registration via `ON CONFLICT (attempt_id)`, strict provenance/fixture validation, alreadyCompleted invariant recovery, CAS terminal state protection, financial preconditions) | PASS: 11/11 PG16 integration tests (completion.integration.test.ts, PD-AT-01a, PD-AT-02a, crash recovery, CAS, queue routing, provenance, deadlock-free) |
 | PD-05a.5 | R1 | REQUIRED | Worker runtime integration (replay:* queue consumers for IMAGE/VIDEO/TTS/ASSEMBLY, strict job identity, single InFlightTracker with rejection safety, immediate shutdown timeout covering runners, graceful shutdown) | PASS: 8/8 unit tests (shutdown.test.ts) + 3/3 PG16 integration tests (worker.integration.test.ts, 4-kind E2E, LIVE queue isolation, cold-start) |
 | PD-05a.6 | R1 | REQUIRED | Review, evidence checks & PR handoff | PASS: `pnpm -r typecheck` (0 errors), 16/16 contracts unit, 55/55 server unit, 81/81 PG16 integration (100% GREEN) |
-| PD-05b | R0 | DEFERRED | LIVE provider execution, remote download, and financial ledger settlement | Deferred to live provider credentials checkpoint (blocks final G3 signoff) |
+| PD-05b.1 | R1 | REQUIRED | Contract alignment (`keyframes` locator, `billingEvidenceSchema`, `pollContinuationPayloadSchema`, fal Queue schemas) | PASS: 23/23 contracts unit (`providers.test.ts`), `spec.md` Gate 3 Pathways A & B aligned |
+| PD-05b.2 | R0 | REQUIRED | Strict public unicast IP validator (`isPublicUnicastIp`) & pinned socket manual-redirect downloader (`downloadRemoteAsset`) | PASS: 7/7 unit tests (`ssrf.test.ts`, `remote-download.test.ts`), DNS rebind, redirect & header stripping verified |
+| PD-05b.3 | R0 | REQUIRED | Live provider adapters (`LiveGeminiImageAdapter`, `LiveRunwayVideoAdapter`, `LiveFalKlingVideoAdapter`) | PASS: 10/10 unit tests (`providers.test.ts`), Gemini interleaved parser, fal `URL.origin` whitelist |
+| PD-05b.4 | R0 | REQUIRED | Atomic delta settlement (`completeLiveAttempt`) & v8.1 `operator_reconciled` receipt guard | PASS: 8/8 PG16 integration tests (`live-completion.integration.test.ts`), RED->GREEN verified |
+| PD-05b.5 | R0 | REQUIRED | Crash recovery milestones A/B, multi-turn polling continuation (`live:generation:poll`), SIGTERM pause, `recoverStaleSubmittedDispatches` | PASS: PG16 integration tests in `live-completion.integration.test.ts` & `worker.integration.test.ts` |
+| PD-05b.6 | R1 | REQUIRED | Worker runtime wiring (`live:generation:dispatch`, `live:generation:poll` stately queue, `shutdownAbortController`, sweeper) | PASS: 8/8 PG16 integration tests (`worker.integration.test.ts`) + 10/10 unit tests (`shutdown.test.ts`) |
+| PD-05b.7 | R0 | REQUIRED | Strict provider-to-rate-card binding & credentials guard across both admission paths | PASS: 24/24 PG16 integration tests (`financial.integration.test.ts`), zero-leak rollback verified |
+| PD-05b.8 | R1 | REQUIRED | Standalone Dual-Flow Canary CLI (`scripts/canary-live-dispatch.ts`) & Gate 1/Gate 2 verification | PASS: fail-closed without `LIVE_BILLING_ATTESTED=true`; Gate 1 & Gate 2 100% GREEN (Gate 3 paid canary awaiting operator attestation) |
 | PD-06 | R1 | REQUIRED | Final milestone quality gates & handoff | `pnpm -r lint`, `typecheck`, `test`, `test:guardrails`, `check:evidence` |
 
 ### Test-First Evidence (R0 / R1)
@@ -225,3 +232,66 @@ Record actual check statuses and remaining blockers, never anticipated results.
     - Added unit test in `servers/src/worker/shutdown.test.ts` asserting fail-closed rejection on `live:tts:dispatch` failure with zero runner starts.
     - Added integration test in `servers/src/worker/worker.integration.test.ts` asserting fail-closed behavior against PostgreSQL 16 runtime.
     - Verified all 83 integration tests pass across 9 test suites in Docker PostgreSQL 16.
+
+- **2026-11-27 PD-05b Core (v8.1) Implementation & Verification Evidence (Gate 1 & Gate 2 Complete)**:
+  - **v8.1 `operator_reconciled` RED $\rightarrow$ GREEN Evidence (`live-completion.integration.test.ts`)**:
+    - **RED (v8 logic before `operator_reconciled` receipt query)**:
+      ```
+      FAIL src/dispatch/live-completion.integration.test.ts > v8.1 Case 1: preserves operator-reconciled PENDING liability (10k on 100k res) when worker completes with PENDING
+      AssertionError: expected '100000' to be '10000' // Object.is equality
+      Expected: "10000"
+      Received: "100000"
+      ```
+      Case 3 (overlapping operator reconcile committed before settlement lock) also failed identically (`Received: "100000"`, `Expected: "10000"`).
+    - **GREEN (v8.1 `operator_reconciled` check inside `FBA -> AFS -> ATT` lock)**:
+      - Case 1 (Operator `PENDING` $\rightarrow$ Worker `PENDING`): Attempt `SUCCEEDED`, 1 Asset (`PENDING_REVIEW`), `attempt_financial_state` & `film_budget_accounts` verified at exact amounts `pending_liability_usd_micros = '10000'`, `reservation_open_usd_micros = '100000'`, `actual_spent_usd_micros = '0'`, `version = 1` (zero worker ledger events), `auditFinancialProjection.matches = true`.
+      - Case 2 (Distinct attempt receipt on same film): Attempt A `pending = '10000'`, Attempt B `pending = '40000'`, Film `pending = '50000'`, `auditFinancialProjection.matches = true`.
+      - Case 3 (Overlapping operator & worker): Worker observed committed receipt inside `tx` and preserved `pending = '10000'`, `reservation_open = '100000'`, `auditFinancialProjection.matches = true`.
+      - v8 BLOCK 1 (`PARTIAL 30k -> CONFIRMED_UNCHARGED`): Emitted `CHARGE_CORRECTED` (`'-30000'`) and `RESERVATION_RELEASED` (`'70000'`), `actual_spent_usd_micros = '0'`, `reserved_open_usd_micros = '0'`, `auditFinancialProjection.matches = true`.
+      - v8 BLOCK 2 (`DISPUTED` preservation): Preserved `billing_status = 'DISPUTED'`, `realized = '20000'`, `pending = '10000'`, `reservation_open = '80000'`, `auditFinancialProjection.matches = true`.
+  - **Verification Totals**:
+    - `pnpm typecheck`: 0 errors across `@nolen/contracts`, `@nolen/server`, `@nolen/web`.
+    - `pnpm lint`: 0 errors, 0 warnings across all 3 workspaces.
+    - `pnpm --filter @nolen/contracts test`: 23/23 PASS (5 files).
+    - `pnpm --filter @nolen/server test:guardrails`: 4/4 PASS.
+    - `pnpm --filter @nolen/server test` (in container with `ffmpeg` & `ffprobe`): 105/105 PASS (20 files).
+    - `pnpm --filter @nolen/server test:integration` (in container against PostgreSQL 16): 114/114 PASS (13 files).
+    - `pnpm dispatch:canary:smoke` (without `LIVE_BILLING_ATTESTED=true`): fails closed cleanly (exit code 1).
+    - `pnpm check:evidence`: PASS (38 engineering documents).
+  - **2026-11-27 Post-Review 4-BLOCK Remediation (`runway-video.ts`, `live-completion.ts`, `gemini-image.ts`, `docker-compose.yml`)**:
+    - **BLOCK 1 (Runway 404 billing)**: Updated `LiveRunwayVideoAdapter.pollStatus()` (`servers/src/providers/runway-video.ts`) so HTTP 404 returns `billingEvidence: { status: 'PENDING', evidenceRef: 'runway:404:...' }` (reconcile returns `UNRESOLVED_MANUAL_REVIEW`), preserving open reservations and prior `PARTIAL` charges. Added unit test in `providers.test.ts` and PG16 test in `live-completion.integration.test.ts`.
+    - **BLOCK 2 (Pre-submit credential race CAS)**: Updated `completeLiveAttempt` (`servers/src/dispatch/live-completion.ts`) to execute an atomic CAS (`INSERT ... ON CONFLICT DO UPDATE ... WHERE outbound_dispatches.state = 'NOT_STARTED'`) inside the pre-submit transaction before releasing any financial hold. Added PG16 barrier test in `live-completion.integration.test.ts`.
+    - **BLOCK 3 (Gemini missing/corrupt reference)**: Updated `LiveGeminiImageAdapter.submit()` (`servers/src/providers/gemini-image.ts`) to check existence (in `references` or `keyframes` per `asset.source`) and verify SHA-256 against `asset.sha256Hash` for every `inputAssets` item before calling `transport()`, throwing `GEMINI_REFERENCE_ASSET_MISSING` / `GEMINI_REFERENCE_HASH_MISMATCH` with 0 paid calls. Added V2 unit test in `providers.test.ts`.
+    - **BLOCK 4 (Docker Compose credentials)**: Updated `docker-compose.yml` to propagate `GEMINI_API_KEY`, `RUNWAY_API_KEY`, `FAL_API_KEY`, and `EXECUTION_MODE:-REPLAY` to both `web` and `worker`. Verified via `docker compose config` with dummy values and `servers/src/config/compose.test.ts`.
+    - **Post-Edit Verification (historical)**: `pnpm typecheck` (0 errors), `pnpm lint` (0 errors/warnings), `@nolen/contracts` test (23/23 PASS), `test:guardrails` (4/4 PASS), targeted `@nolen/server` unit tests (36/36 PASS across 6 files). The initial Docker outage is superseded by the isolated PG16 verification below.
+  - **Remaining Gate**: Gate 3 (`PD-AT-01b` & `PD-AT-02b` live paid canary calls) awaits separate operator authorization and execution. No paid provider call was made during the verification below.
+
+### 2026-11-27 — Isolated PostgreSQL 16 verification after four BLOCK fixes
+
+Source: [PD-001 acceptance criteria](spec.md#acceptance-criteria), [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md), [financial integrity](../financial-integrity/spec.md).
+
+- **Scope**: REQUIRED verification of PD-05b core, including Runway 404 financial retention, pre-submit credential CAS, Gemini reference integrity, and Compose credential propagation. No database migration or UI behavior change. Paid canary remains unexecuted.
+- **Branch/base**: `feature/pd05b-live-provider-core` from `origin/main` (`39ff55d`); PR #18 and the subsequent Free Planner PR #19 are already merged, so PD-05b requires its own PR.
+- **Environment**: Docker Engine 29.9.3, PostgreSQL **16.14** (`postgres:16-alpine`), Node 22.23.0, FFmpeg/FFprobe in image `nolen-pd05b-verify:20261127`. Test-only containers use the internal network `nolen-pd05b-verify-20261127`, no published ports, no demo database/media volume, empty provider credentials and `LIVE_BILLING_ATTESTED=false`. No background application worker competed with integration tests.
+- **Source under test**: current PD-05b working changes; image built with `docker build -t nolen-pd05b-verify:20261127 .`. The focused test repair below was copied into the test container. The committed `servers/tsconfig.json` was restored inside that container before final typecheck/lint, excluding the unrelated local config edit from verification.
+- **Observed failure and repair**: the first focused PG16 run had 9 PASS / 1 FAIL. The PARTIAL-before-404 test expected only `RESERVATION_CREATED`, `CHARGE_POSTED`, but operator reconciliation legitimately also releases 30k from the original 100k reservation. The test now snapshots ledger IDs/types/amounts **after** reconciliation and asserts exact equality after worker completion; realized charge remains 30k, reservation remains 70k, and the projection audit matches. No production financial rule was changed or relaxed.
+
+| Check / command inside test container | Actual result |
+|---|---|
+| Focused `pnpm --filter @nolen/server exec vitest run --config vitest.integration.config.ts src/dispatch/live-completion.integration.test.ts` | **PASS 10/10**, no skipped tests; includes Runway 404 PENDING/PARTIAL and missing-credential concurrent-worker CAS regressions |
+| Full `pnpm --filter @nolen/server exec vitest run --config vitest.integration.config.ts` on fresh `nolen_pd_full_test` | **PASS 116/116**, 13 files, no skipped tests; live completion 10, worker 8, financial 24, replay completion 12, dispatch 7, local pan/zoom 6, plus existing asset/story/film/migration/health suites |
+| Full server `vitest run` with `DATABASE_URL`, `STORAGE_BASE_PATH`, `EXECUTION_MODE` unset | **PASS 108/108**, 21 files; includes Gemini reference-integrity and Compose configuration tests |
+| `pnpm --filter @nolen/contracts test` | **PASS 23/23**, 5 files |
+| `pnpm typecheck`, `pnpm lint` | **PASS** across all workspaces, zero warnings |
+| `pnpm test:guardrails`, `pnpm test:evidence` | **PASS 4/4** each |
+| `pnpm check:evidence`, `git diff --check` | **PASS**, 38 engineering documents; structure/file links and whitespace only |
+| `docker compose config --format json` with dummy credentials | **PASS**, both web and worker receive all three provider keys and REPLAY mode |
+
+- **Production interfaces / file registration**:
+  - [Provider contracts](../../packages/contracts/src/providers.ts) and [contract tests](../../packages/contracts/src/providers.test.ts): billing evidence, local keyframe locators and poll-continuation payloads; DEC-P02/P05/P06.
+  - [Provider factory](../../servers/src/providers/index.ts), [Gemini image](../../servers/src/providers/gemini-image.ts), [Runway video](../../servers/src/providers/runway-video.ts), [fal Kling](../../servers/src/providers/fal-kling-video.ts) and [adapter tests](../../servers/src/providers/providers.test.ts): LIVE media transports and fail-closed credential/reference checks; PD-AT-01b/02b/09.
+  - [SSRF validation](../../servers/src/lib/ssrf.ts), [downloader](../../servers/src/lib/remote-download.ts), [SSRF tests](../../servers/src/lib/ssrf.test.ts), [download tests](../../servers/src/lib/remote-download.test.ts): public IP pinning, redirect validation, bounded local downloads; PD-AT-07.
+  - [LIVE completion](../../servers/src/dispatch/live-completion.ts), [PG16 regressions](../../servers/src/dispatch/live-completion.integration.test.ts), [recovery service](../../servers/src/dispatch/service.ts), [worker](../../servers/src/worker/index.ts), [worker tests](../../servers/src/worker/worker.integration.test.ts): durable claims, polling continuations and locked delta settlement; PD-AT-03/04/05/10/14.
+  - [Admission](../../servers/src/financial/repository.ts), [financial tests](../../servers/src/financial/financial.integration.test.ts), [replay completion tests](../../servers/src/dispatch/completion.integration.test.ts), [local adapter tests](../../servers/src/providers/ffmpeg-pan-zoom.test.ts): rate-card/credential admission and regression compatibility; DEC-P02/P05.
+  - [Compose](../../docker-compose.yml), [configuration test](../../servers/src/config/compose.test.ts), [canary CLI](../../scripts/canary-live-dispatch.ts) and [root scripts](../../package.json): server-only credential propagation and explicit paid-canary entry point, not executed in this verification. Existing [C4](../../docs/C4-Model/c4_model_architecture.drawio) remains the architecture reference.
+- **Next gate / rollback**: review and CI on the new PD-05b PR; actual provider endpoints, pricing, licensing and paid-generation outcomes remain unverified by fake transports. Keep producer approval gates and PENDING liabilities intact. Roll back code/config via Git if needed; never delete or rewrite production ledger events. Unrelated local config, diagram and quick-start/design files are excluded from the commit.

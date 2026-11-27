@@ -7,8 +7,10 @@ import {
   type SubmissionResult,
   type ReconciliationResult,
   type AssetLocator,
+  type PollContinuationPayload,
 } from '@nolen/contracts';
 import { assertSafeRemoteUrl } from '../lib/ssrf.js';
+import type { PollScheduler } from './live-completion.js';
 
 export interface DispatchExecutionOptions {
   simulateCrashAt?: 'BEFORE_CLAIM' | 'DURING_HTTP_RAW_CRASH' | 'AFTER_SUBMIT';
@@ -349,6 +351,73 @@ export async function recoverStaleSubmissions(
         attemptId: row.attempt_id,
         recovered: !outcome.skipped && outcome.state === 'SUBMISSION_UNCERTAIN',
       });
+    } catch {
+      results.push({ attemptId: row.attempt_id, recovered: false });
+    }
+  }
+  return results;
+}
+
+/**
+ * Rescues orphaned LIVE dispatches that persisted provider_job_id (state = 'SUBMITTED')
+ * but lost their active/pending pg-boss job (e.g. continuation enqueue retry exhaustion
+ * or hard worker crash).
+ *
+ * Strictly checks pg-boss job table to ensure no 'created', 'retry', or 'active' job exists
+ * for the attempt before re-enqueuing directly to 'live:generation:poll' (zero second submits).
+ */
+export async function recoverStaleSubmittedDispatches(
+  boss: PollScheduler,
+  bossSchema = 'pgboss',
+  staleThresholdMs = 90_000,
+): Promise<Array<{ attemptId: string; recovered: boolean }>> {
+  if (!/^[a-zA-Z0-9_]+$/.test(bossSchema)) {
+    throw new Error(`Invalid pg-boss schema identifier: ${bossSchema}`);
+  }
+
+  const orphanedRows = await pgClient.begin(async tx => {
+    const rows = await tx<{ attempt_id: string; provider_job_id: string }[]>`
+      SELECT od.attempt_id, od.provider_job_id
+      FROM outbound_dispatches od
+      JOIN attempts a ON a.id = od.attempt_id
+      WHERE od.state = 'SUBMITTED'
+        AND od.provider_job_id IS NOT NULL
+        AND a.execution_mode = 'LIVE'
+        AND a.state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELED')
+        AND od.updated_at <= now() - (${staleThresholdMs} * interval '1 millisecond')
+        AND NOT EXISTS (
+          SELECT 1 FROM ${tx.unsafe(`"${bossSchema}".job`)} j
+          WHERE j.name IN ('live:generation:dispatch', 'live:generation:poll')
+            AND j.state IN ('created', 'retry', 'active')
+            AND (j.id = od.attempt_id OR j.data->>'attemptId' = od.attempt_id::text)
+        )
+      FOR UPDATE OF od SKIP LOCKED
+    `;
+
+    for (const row of rows) {
+      await tx`
+        UPDATE outbound_dispatches
+        SET updated_at = now()
+        WHERE attempt_id = ${row.attempt_id} AND state = 'SUBMITTED'
+      `;
+    }
+    return rows;
+  });
+
+  const results: Array<{ attemptId: string; recovered: boolean }> = [];
+  for (const row of orphanedRows) {
+    try {
+      await boss.send(
+        'live:generation:poll',
+        {
+          kind: 'POLL_CONTINUATION',
+          attemptId: row.attempt_id,
+          providerJobId: row.provider_job_id,
+          turnNumber: 2,
+        } satisfies PollContinuationPayload,
+        { singletonKey: row.attempt_id, retryLimit: 5, retryDelay: 10 },
+      );
+      results.push({ attemptId: row.attempt_id, recovered: true });
     } catch {
       results.push({ attemptId: row.attempt_id, recovered: false });
     }

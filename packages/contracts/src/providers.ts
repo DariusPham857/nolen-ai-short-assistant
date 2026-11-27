@@ -42,7 +42,7 @@ export const assetLocatorSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('LOCAL_STORAGE'),
-    category: z.literal('videos'),
+    category: z.enum(['keyframes', 'videos']),
     filename: z.string().min(1).max(255).refine(
       v => !v.includes('..') && !v.includes('/') && !v.includes('\\'),
       { message: 'filename must be a basename without path separators' },
@@ -219,6 +219,47 @@ export const submissionResultSchema = z.object({
   estimatedCompletionSeconds: z.number().int().nonnegative().optional(),
 }).strict();
 
+export const billingEvidenceSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('CONFIRMED_CHARGED'),
+    realizedChargeUsdMicros: z.string().regex(/^\d+$/),
+    evidenceRef: z.string().min(1).max(500),
+  }).strict(),
+  z.object({
+    status: z.literal('CONFIRMED_UNCHARGED'),
+    evidenceRef: z.string().min(1).max(500),
+  }).strict(),
+  z.object({
+    status: z.literal('PENDING'),
+    evidenceRef: z.string().max(500).optional(),
+  }).strict(),
+]);
+
+export const pollContinuationPayloadSchema = z.object({
+  kind: z.literal('POLL_CONTINUATION'),
+  attemptId: z.string().uuid(),
+  providerJobId: z.string().min(1).max(500),
+  turnNumber: z.number().int().min(2),
+}).strict();
+
+export const falQueueSubmitResponseSchema = z.object({
+  request_id: z.string().min(1),
+  status_url: z.string().url(),
+  response_url: z.string().url(),
+});
+
+export const falQueueStatusResponseSchema = z.object({
+  status: z.enum(['IN_QUEUE', 'IN_PROGRESS', 'COMPLETED', 'FAILED']),
+});
+
+export const falQueueResultResponseSchema = z.object({
+  video: z.object({
+    url: z.string().url(),
+    content_type: z.string().optional(),
+    file_size: z.number().int().nonnegative().optional(),
+  }),
+});
+
 export const providerStatusUpdateSchema = z.object({
   providerJobId: z.string().min(1).max(500),
   state: dispatchStateSchema,
@@ -227,6 +268,7 @@ export const providerStatusUpdateSchema = z.object({
   errorMessage: z.string().max(2000).optional(),
   rawResponse: z.unknown().optional(),
   locator: assetLocatorSchema.optional(),
+  billingEvidence: billingEvidenceSchema.optional(),
 }).strict().superRefine((data, ctx) => {
   if (data.provenance === 'REPLAY_FIXTURE') {
     if (data.mediaUrl !== undefined) {
@@ -244,10 +286,10 @@ export const providerStatusUpdateSchema = z.object({
       });
     }
   } else if (data.provenance === 'LIVE_PROVIDER') {
-    if (data.locator && data.locator.kind !== 'REMOTE_URL') {
+    if (data.locator && data.locator.kind !== 'REMOTE_URL' && data.locator.kind !== 'LOCAL_STORAGE') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'LIVE_PROVIDER provenance requires REMOTE_URL locator',
+        message: 'LIVE_PROVIDER provenance requires REMOTE_URL or LOCAL_STORAGE locator',
         path: ['locator'],
       });
     }
@@ -300,3 +342,8 @@ export type ProviderStatusUpdate = z.infer<typeof providerStatusUpdateSchema>;
 export type ReconciliationResult = z.infer<typeof reconciliationResultSchema>;
 export type AssetLocator = z.infer<typeof assetLocatorSchema>;
 export type LocalVideoMetadata = z.infer<typeof localVideoMetadataSchema>;
+export type BillingEvidence = z.infer<typeof billingEvidenceSchema>;
+export type PollContinuationPayload = z.infer<typeof pollContinuationPayloadSchema>;
+export type FalQueueSubmitResponse = z.infer<typeof falQueueSubmitResponseSchema>;
+export type FalQueueStatusResponse = z.infer<typeof falQueueStatusResponseSchema>;
+export type FalQueueResultResponse = z.infer<typeof falQueueResultResponseSchema>;

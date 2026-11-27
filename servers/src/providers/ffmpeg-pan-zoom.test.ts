@@ -177,11 +177,17 @@ describe('ffmpeg-pan-zoom unit behavior', () => {
   });
 
   it('creates LIVE LocalPanZoomAdapter via createProviderAdapter while remote LIVE providers still throw', () => {
-    const adapter = createProviderAdapter('LOCAL_PAN_ZOOM', 'LIVE');
-    expect(adapter.kind).toBe('LOCAL_PAN_ZOOM');
-    expect(adapter.executionMode).toBe('LIVE');
-    expect(adapter.isFake).toBe(false);
-    expect(() => createProviderAdapter('GEMINI', 'LIVE')).toThrow('LIVE_PROVIDER_UNAVAILABLE');
+    const prevGem = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    try {
+      const adapter = createProviderAdapter('LOCAL_PAN_ZOOM', 'LIVE');
+      expect(adapter.kind).toBe('LOCAL_PAN_ZOOM');
+      expect(adapter.executionMode).toBe('LIVE');
+      expect(adapter.isFake).toBe(false);
+      expect(() => createProviderAdapter('GEMINI', 'LIVE')).toThrow('LIVE_PROVIDER_UNAVAILABLE');
+    } finally {
+      if (prevGem !== undefined) process.env.GEMINI_API_KEY = prevGem;
+    }
   });
 
   it('publishes videos atomically without overwriting existing blobs and preserves prior blob on crash/conflict', async () => {
