@@ -70,7 +70,18 @@ Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
 - **Evidence Limits**:
   - Offline fixtures prove `validate()` can report `ERROR` solely due to case differences in `pose` and `lighting`.
   - The updated prompt adds rules that were previously under-specified, and unit tests prove those instructions are included in the outgoing request.
-  - This does **not** prove the cause of the 4 `ERROR`s from the earlier live run (`2026-11-26T15:08:45.482Z`), because finding details were not persisted then; nor does it prove Gemini compliance without a separate authorized live diagnostic run against this commit.
+  - This does **not** prove the cause of the 4 `ERROR`s from the earlier live run (`2026-11-26T15:08:45.482Z`), because finding details were not persisted then.
+- **Live Diagnostic Run on `cdeef09` (`2026-11-27`)**:
+  - **Command**: `pnpm planner:smoke -- --run-live --confirm-free-tier` (1 call, no retry, operator-authorized)
+  - **Result**: `PASS` (exit 0)
+    - `timestampUtc`: `2026-11-27T04:04:59.589Z`
+    - `model`: `gemini-3.5-flash-lite`
+    - `billingModel`: `operator-attested`
+    - `preflightStatus`: `READY`
+    - `generationRequestsStarted`: `1`
+    - `durationMs`: `6076`
+    - `scenesCount`: `1`, `shotsCount`: `3`, `findingsBySeverity`: `{ ERROR: 0, WARNING: 0 }`, `findings`: `[]`, `errorCode`: `null`
+  - **Note**: Single-run diagnostic `PASS` with `0` continuity findings under `cdeef09`; producer review and story approval gates remain mandatory before downstream generation.
 
 ### CI repair verification — 2026-11-26
 - **Scope**: REQUIRED R2 test-fixture/locator repairs for `FP-AT-04`, `FP-AT-05` and `FP-AT-05b`; no production behavior or public interface change.
