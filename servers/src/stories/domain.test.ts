@@ -121,3 +121,77 @@ it('normalizes empty referenceAssetIds identically to v1 and scopes dependency c
   expect(shotDependency(shot0V1, boundAB)).not.toBe(origHash);
   expect(shotDependency(shot0V1, boundAB)).toBe(shotDependency(shot0V1, boundBA));
 });
+
+it('offline fixture: exact end->start string mismatch in pose and lighting triggers ERRORs unless matched or declared in intendedTransitions', () => {
+  const makeTwoShotFixture = () => {
+    const c = canonicalStoryV1();
+    c.scenes[0].shots = c.scenes[0].shots.slice(0, 2);
+    c.scenes[0].shots[0].spec.durationSeconds = 20;
+    c.scenes[0].shots[1].spec.durationSeconds = 25;
+    c.scenes[0].shots[0].spec.continuity.end.lighting = 'Warm daylight';
+    c.scenes[0].shots[0].spec.continuity.end.characterStates[0].pose = 'Sitting at desk';
+    c.scenes[0].shots[1].spec.continuity.start.lighting = 'Warm daylight';
+    c.scenes[0].shots[1].spec.continuity.start.characterStates[0].pose = 'Sitting at desk';
+    c.scenes[0].shots[1].spec.intendedTransitions = [];
+    return c;
+  };
+
+  // (2) Matching end->start produces 0 continuity ERRORs (even when shot 0 changes internally from start to end)
+  const matched = makeTwoShotFixture();
+  expect(validate(matched, 45).filter((f) => f.severity === 'ERROR')).toEqual([]);
+
+  // (1) Case-only mismatch in pose and lighting when intendedTransitions is empty
+  const caseMismatched = makeTwoShotFixture();
+  caseMismatched.scenes[0].shots[1].spec.continuity.start.characterStates[0].pose = 'sitting at desk';
+  caseMismatched.scenes[0].shots[1].spec.continuity.start.lighting = 'Warm Daylight';
+  const findings = validate(caseMismatched, 45);
+  expect(findings).toContainEqual(
+    expect.objectContaining({
+      code: 'TEMPORAL_STATE',
+      severity: 'ERROR',
+      waivable: false,
+      path: 'shots.1.continuity.pose.hero',
+    }),
+  );
+  expect(findings).toContainEqual(
+    expect.objectContaining({
+      code: 'LOCATION_LIGHTING',
+      severity: 'ERROR',
+      waivable: false,
+      path: 'shots.1.continuity.lighting',
+    }),
+  );
+
+  // (3) Actual intentional pose and lighting change with matching intendedTransitions clears both ERRORs
+  const intentionalChange = makeTwoShotFixture();
+  intentionalChange.scenes[0].shots[1].spec.continuity.start.characterStates[0].pose = 'Standing by desk';
+  intentionalChange.scenes[0].shots[1].spec.continuity.start.lighting = 'Cool dusk';
+  intentionalChange.scenes[0].shots[1].spec.intendedTransitions = [
+    { field: 'pose', reason: 'Character stands up across cut' },
+    { field: 'lighting', reason: 'Time-of-day shift' },
+  ];
+  expect(validate(intentionalChange, 45).filter((f) => f.severity === 'ERROR')).toEqual([]);
+});
+
+it('offline fixture: recurring character changing styleRefId triggers IDENTITY_LOCK ERROR', () => {
+  const c = canonicalStoryV1();
+  c.scenes[0].shots = c.scenes[0].shots.slice(0, 2);
+  c.scenes[0].shots[0].spec.durationSeconds = 20;
+  c.scenes[0].shots[1].spec.durationSeconds = 25;
+  c.storyBible.styleRefs.push({
+    id: 'noir-sketch',
+    name: 'Noir Sketch',
+    description: 'High-contrast ink sketch',
+  });
+  c.scenes[0].shots[1].spec.styleRefId = 'noir-sketch';
+
+  const findings = validate(c, 45);
+  expect(findings).toContainEqual(
+    expect.objectContaining({
+      code: 'IDENTITY_LOCK',
+      severity: 'ERROR',
+      waivable: false,
+      path: 'shots.1.styleRefId',
+    }),
+  );
+});

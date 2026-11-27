@@ -233,8 +233,10 @@ export async function checkFreePlannerPreflight(deps?: {
     const response = await fetchImpl(GEMINI_MODEL_META_ENDPOINT, {
       method: 'GET',
       headers: { 'x-goog-api-key': apiKey },
+      redirect: 'error',
       signal: controller.signal,
     });
+    await response.body?.cancel();
     if (response.status === 200) {
       credentialValid = true;
       modelAvailable = true;
@@ -272,8 +274,8 @@ export async function checkFreePlannerPreflight(deps?: {
   };
 }
 
-/** Read response bytes with an explicit cap before JSON parsing. */
-async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+/** Read response bytes with an explicit cap before JSON parsing, preserving timeout/stream error mapping. */
+async function readBoundedText(response: Response, maxBytes: number, signal: AbortSignal): Promise<string> {
   const contentLengthHeader = response.headers.get('content-length');
   if (contentLengthHeader) {
     const declared = Number(contentLengthHeader);
@@ -284,28 +286,44 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
   }
 
   if (!response.body) {
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
-      throw new ApiFailure(502, 'FREE_PLANNER_INVALID_OUTPUT', 'Gemini response exceeded maximum size');
+    try {
+      const text = await response.text();
+      if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+        throw new ApiFailure(502, 'FREE_PLANNER_INVALID_OUTPUT', 'Gemini response exceeded maximum size');
+      }
+      return text;
+    } catch (err) {
+      if (err instanceof ApiFailure) throw err;
+      if (signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw new ApiFailure(504, 'FREE_PLANNER_TIMEOUT', 'Gemini Free Planner request timed out');
+      }
+      throw new ApiFailure(502, 'FREE_PLANNER_UPSTREAM_FAILED', 'Gemini Free Planner stream read failed');
     }
-    return text;
   }
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      totalBytes += value.byteLength;
-      if (totalBytes > maxBytes) {
-        await reader.cancel();
-        throw new ApiFailure(502, 'FREE_PLANNER_INVALID_OUTPUT', 'Gemini response exceeded maximum size');
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel();
+          throw new ApiFailure(502, 'FREE_PLANNER_INVALID_OUTPUT', 'Gemini response exceeded maximum size');
+        }
+        chunks.push(value);
       }
-      chunks.push(value);
     }
+  } catch (err) {
+    if (err instanceof ApiFailure) throw err;
+    if (signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      throw new ApiFailure(504, 'FREE_PLANNER_TIMEOUT', 'Gemini Free Planner request timed out');
+    }
+    throw new ApiFailure(502, 'FREE_PLANNER_UPSTREAM_FAILED', 'Gemini Free Planner stream read failed');
   }
 
   const combined = new Uint8Array(totalBytes);
@@ -321,14 +339,17 @@ function buildPlannerPrompt(input: { brief: string; durationTargetSeconds: numbe
   return [
     'Generate a structured Story v2 JSON proposal for a short film based on the brief below.',
     'Write all creative text (script, narrative, titles, descriptions, prompts) in the same language as the brief.',
-    `Target total duration: ${input.durationTargetSeconds} seconds (total across all shots must be between 30 and 60 seconds, ideally matching ${input.durationTargetSeconds}s).`,
+    `Target total duration: ${input.durationTargetSeconds} seconds. Total durationSeconds across all shots must be 30–60s and match targetDurationSeconds (${input.durationTargetSeconds}s).`,
     `Aspect ratio: ${input.aspectRatio}.`,
     'Rules:',
     '- Use schemaVersion "2" for storyBible and every shot spec.',
-    '- Keep 1 to 10 shots total across scenes; each shot durationSeconds is an integer from 1 to 60.',
+    '- Keep 1 to 10 shots total across scenes; each shot durationSeconds is an integer from 1 to 60, and the sum across all shots must be 30–60s matching targetDurationSeconds.',
     '- Every locationId, styleRefId, subjectIds, characterId, wardrobeId, propId, and heldPropIds used in shots must exist in storyBible.',
     '- Every shot spec.locationId must match continuity.start.locationId and continuity.end.locationId.',
     '- Every character in subjectIds must have a matching entry in both continuity.start.characterStates and continuity.end.characterStates.',
+    '- IDENTITY_LOCK: Keep the exact same styleRefId for any recurring character across all shots in which they appear.',
+    '- Adjacent shot continuity (including across scene boundaries): for every i > 0, shot[i].continuity.start must copy shot[i-1].continuity.end verbatim for locationId, lighting, propIds, and each shared character\'s wardrobeId, heldPropIds, and pose unless an intentional change occurs.',
+    '- intendedTransitions: for any intentional change between shot[i-1].continuity.end and shot[i].continuity.start, declare { field, reason } in shot[i].intendedTransitions (where field is one of wardrobe, heldProps, pose, location, lighting, props); leave intendedTransitions empty ([]) when unchanged.',
     '- Do not include database UUIDs, id fields, expectedShotRevisionId, referenceAssetIds, or keyframeOverride.',
     '',
     `Brief:\n${input.brief}`,
@@ -351,46 +372,50 @@ export async function generateGeminiStoryProposal(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  let response: Response;
+  let rawBody: string;
   try {
-    response = await fetchImpl(GEMINI_GENERATE_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: buildPlannerPrompt(input) }] }],
-        generationConfig: {
-          candidateCount: 1,
-          responseMimeType: 'application/json',
-          responseJsonSchema: STORY_PROPOSAL_V2_JSON_SCHEMA,
-          maxOutputTokens: FREE_PLANNER_MAX_OUTPUT_TOKENS,
+    let response: Response;
+    try {
+      response = await fetchImpl(GEMINI_GENERATE_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
         },
-      }),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new ApiFailure(504, 'FREE_PLANNER_TIMEOUT', 'Gemini Free Planner request timed out');
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: buildPlannerPrompt(input) }] }],
+          generationConfig: {
+            candidateCount: 1,
+            responseMimeType: 'application/json',
+            responseJsonSchema: STORY_PROPOSAL_V2_JSON_SCHEMA,
+            maxOutputTokens: FREE_PLANNER_MAX_OUTPUT_TOKENS,
+          },
+        }),
+        redirect: 'error',
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw new ApiFailure(504, 'FREE_PLANNER_TIMEOUT', 'Gemini Free Planner request timed out');
+      }
+      throw new ApiFailure(502, 'FREE_PLANNER_UPSTREAM_FAILED', 'Gemini Free Planner network request failed');
     }
-    throw new ApiFailure(502, 'FREE_PLANNER_UPSTREAM_FAILED', 'Gemini Free Planner network request failed');
+
+    if (!response.ok) {
+      await response.body?.cancel();
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        throw new ApiFailure(503, 'FREE_PLANNER_UNAVAILABLE', 'Gemini Free Planner credentials or model unavailable');
+      }
+      if (response.status === 429) {
+        throw new ApiFailure(429, 'FREE_PLANNER_RATE_LIMITED', 'Gemini Free Planner rate limit exceeded');
+      }
+      throw new ApiFailure(502, 'FREE_PLANNER_UPSTREAM_FAILED', 'Gemini Free Planner upstream request failed');
+    }
+
+    rawBody = await readBoundedText(response, FREE_PLANNER_MAX_RESPONSE_BYTES, controller.signal);
   } finally {
     clearTimeout(timer);
   }
-
-  if (!response.ok) {
-    await response.body?.cancel();
-    if (response.status === 401 || response.status === 403 || response.status === 404) {
-      throw new ApiFailure(503, 'FREE_PLANNER_UNAVAILABLE', 'Gemini Free Planner credentials or model unavailable');
-    }
-    if (response.status === 429) {
-      throw new ApiFailure(429, 'FREE_PLANNER_RATE_LIMITED', 'Gemini Free Planner rate limit exceeded');
-    }
-    throw new ApiFailure(502, 'FREE_PLANNER_UPSTREAM_FAILED', 'Gemini Free Planner upstream request failed');
-  }
-
-  const rawBody = await readBoundedText(response, FREE_PLANNER_MAX_RESPONSE_BYTES);
   let envelope: {
     promptFeedback?: { blockReason?: string };
     candidates?: Array<{

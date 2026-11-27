@@ -15,6 +15,7 @@
     "test:guardrails": "pnpm --filter @nolen/server test:guardrails",
     "check:evidence": "node scripts/check-evidence.mjs",
     "planner:preflight": "pnpm --filter @nolen/server planner:preflight",
+    "planner:smoke": "pnpm --filter @nolen/server planner:smoke",
     "test:evidence": "node --test scripts/check-evidence.test.mjs",
     "db:migrate": "pnpm --filter @nolen/server db:migrate",
     "db:seed": "pnpm --filter @nolen/server db:seed"
