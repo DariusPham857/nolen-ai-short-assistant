@@ -177,6 +177,33 @@ describe('FP-02b Gemini transport and validation (R1)', () => {
     expect(result.findings.some(f => f.code === 'TARGET_DURATION')).toBe(true);
   });
 
+  it('includes IDENTITY_LOCK, end->start continuity, intendedTransitions, and 30-60s targetDurationSeconds rules in outgoing prompt', async () => {
+    const fetchMock = vi.fn(async () => geminiOkResponse());
+    await generateGeminiStoryProposal(filmInput, {
+      env: validEnv,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as {
+      contents: Array<{ parts: Array<{ text: string }> }>;
+    };
+    const promptText = body.contents[0].parts[0].text;
+
+    expect(promptText).toContain('IDENTITY_LOCK');
+    expect(promptText).toContain('styleRefId');
+    expect(promptText).toContain('shot[i].continuity.start');
+    expect(promptText).toContain('shot[i-1].continuity.end');
+    for (const field of ['locationId', 'lighting', 'propIds', 'wardrobeId', 'heldPropIds', 'pose']) {
+      expect(promptText).toContain(field);
+    }
+    expect(promptText).toContain('intendedTransitions');
+    expect(promptText).toContain('field');
+    expect(promptText).toContain('reason');
+    expect(promptText).toContain('30–60s');
+    expect(promptText).toContain('targetDurationSeconds (45s)');
+  });
+
   it('maps upstream HTTP, timeout, safety, MAX_TOKENS, malformed JSON, reference error, and >512 KiB stream without retrying (FP-AT-03)', async () => {
     for (const [status, expectedStatus, expectedCode] of [
       [401, 503, 'FREE_PLANNER_UNAVAILABLE'],

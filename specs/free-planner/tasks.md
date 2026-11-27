@@ -62,6 +62,16 @@ Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
   - `durationMs`: `5914`
   - `scenesCount`: `1`, `shotsCount`: `3`, `findingsBySeverity`: `{ ERROR: 4, WARNING: 0 }`, `errorCode`: `null`
 
+### Continuity Diagnostic & Prompt Alignment — 2026-11-27
+- **Changes**:
+  - Added offline continuity fixtures in [servers/src/stories/domain.test.ts](../../servers/src/stories/domain.test.ts) (case-only `pose`/`lighting` mismatch, exact `end->start` match, intentional `pose`/`lighting` transition via `intendedTransitions`, and `IDENTITY_LOCK`).
+  - Updated `buildPlannerPrompt()` in [servers/src/stories/free-planner.ts](../../servers/src/stories/free-planner.ts) with explicit `IDENTITY_LOCK`, verbatim `end->start` continuity, `intendedTransitions`, and `30–60s` duration rules, plus prompt assertion test in [servers/src/stories/free-planner.test.ts](../../servers/src/stories/free-planner.test.ts).
+- **Verification**: `vitest` (`domain.test.ts` 11/11, `free-planner.test.ts` 7/7, `planner-smoke.test.ts` 6/6) `PASS` (`24/24`), `typecheck` `PASS`, `lint` `PASS`, `check:evidence` `PASS`, `git diff --check` `PASS`.
+- **Evidence Limits**:
+  - Offline fixtures prove `validate()` can report `ERROR` solely due to case differences in `pose` and `lighting`.
+  - The updated prompt adds rules that were previously under-specified, and unit tests prove those instructions are included in the outgoing request.
+  - This does **not** prove the cause of the 4 `ERROR`s from the earlier live run (`2026-11-26T15:08:45.482Z`), because finding details were not persisted then; nor does it prove Gemini compliance without a separate authorized live diagnostic run against this commit.
+
 ### CI repair verification — 2026-11-26
 - **Scope**: REQUIRED R2 test-fixture/locator repairs for `FP-AT-04`, `FP-AT-05` and `FP-AT-05b`; no production behavior or public interface change.
 - **Changes**: `dbfcc00` uses a bare Film fixture for the mid-flight deletion barrier, preserving production financial FK/append-only guards. `3d5ad01` filters both E2E alert locators by the expected error message, excluding Next.js route announcements while retaining content assertions.
