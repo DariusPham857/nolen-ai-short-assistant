@@ -6,7 +6,27 @@ import { canonicalStoryV2 } from '@nolen/contracts';
 import { pgClient } from '../servers/src/db/index.js';
 import { migrateDatabase } from '../servers/src/db/migrate.js';
 import { completeLiveAttempt } from '../servers/src/dispatch/live-completion.js';
-import { admitAttempt, auditFinancialProjection, previewGeneration } from '../servers/src/financial/repository.js';
+import {
+  assertPositiveMicros,
+  assertRunwayDuration,
+  planCanaryFromExplicitRates,
+  planCanaryFromRateRows,
+  type CanaryRateSnapshotRow,
+  type PlannedCanaryRates,
+} from '../servers/src/dispatch/canary-preflight.js';
+import {
+  admitAttempt,
+  auditFinancialProjection,
+  previewGeneration,
+  readAttemptFinancial,
+  readBudget,
+} from '../servers/src/financial/repository.js';
+
+function readArg(flag: string): string | undefined {
+  const prefix = `--${flag}=`;
+  const found = process.argv.find(a => a.startsWith(prefix));
+  return found ? found.slice(prefix.length).trim() : undefined;
+}
 
 function assertAttestation(): void {
   if (process.env.LIVE_BILLING_ATTESTED !== 'true') {
@@ -17,6 +37,88 @@ function assertAttestation(): void {
   }
   if (!process.env.RUNWAY_API_KEY?.trim()) {
     throw new Error('RUNWAY_API_KEY is required for PD-AT-02b canary');
+  }
+}
+
+async function resolveCanaryRates(): Promise<PlannedCanaryRates> {
+  const maxBudgetMicros = assertPositiveMicros(
+    readArg('max-budget-micros') ?? process.env.CANARY_MAX_BUDGET_MICROS ?? '1000000',
+    'max-budget-micros',
+  );
+  const runwayDurationRaw = readArg('runway-duration') ?? process.env.CANARY_RUNWAY_DURATION_SEC ?? '5';
+  const runwayDurationSec = assertRunwayDuration(runwayDurationRaw);
+
+  const existingGeminiRateId = readArg('gemini-rate-id') ?? process.env.CANARY_GEMINI_RATE_ID;
+  const existingRunwayRateId = readArg('runway-rate-id') ?? process.env.CANARY_RUNWAY_RATE_ID;
+
+  if (existingGeminiRateId && existingRunwayRateId) {
+    const [gem] = await pgClient<CanaryRateSnapshotRow[]>`
+      SELECT id, provider, model, operation, rate_type, unit_price_usd_micros,
+             provider_maximum_usd_micros, effective_at, expires_at, source_ref
+      FROM rate_card_snapshots WHERE id = ${existingGeminiRateId}
+    `;
+    const [rw] = await pgClient<CanaryRateSnapshotRow[]>`
+      SELECT id, provider, model, operation, rate_type, unit_price_usd_micros,
+             provider_maximum_usd_micros, effective_at, expires_at, source_ref
+      FROM rate_card_snapshots WHERE id = ${existingRunwayRateId}
+    `;
+
+    return planCanaryFromRateRows({
+      geminiRow: gem,
+      runwayRow: rw,
+      geminiRateId: existingGeminiRateId,
+      runwayRateId: existingRunwayRateId,
+      runwayDurationSec,
+      maxBudgetMicros,
+    });
+  }
+
+  return planCanaryFromExplicitRates({
+    geminiRateId: randomUUID(),
+    runwayRateId: randomUUID(),
+    geminiModel: readArg('gemini-model') ?? process.env.CANARY_GEMINI_MODEL ?? '',
+    geminiUnitMicros: readArg('gemini-rate-micros') ?? process.env.CANARY_GEMINI_RESERVATION_MICROS ?? '',
+    geminiMaxMicros: readArg('gemini-max-micros') ?? process.env.CANARY_GEMINI_MAX_MICROS,
+    runwayModel: readArg('runway-model') ?? process.env.CANARY_RUNWAY_MODEL ?? 'gen4_turbo',
+    runwayUnitMicros: readArg('runway-rate-micros') ?? process.env.CANARY_RUNWAY_RATE_MICROS ?? '',
+    runwayMaxMicros: readArg('runway-max-micros') ?? process.env.CANARY_RUNWAY_MAX_MICROS,
+    runwayDurationSec,
+    maxBudgetMicros,
+    sourceRef: readArg('rate-source-ref') ?? process.env.CANARY_RATE_EVIDENCE_REF ?? '',
+  });
+}
+
+async function confirmSpendIfNeeded(rates: PlannedCanaryRates): Promise<boolean> {
+  console.log('\n[canary] Pre-flight Spend & Reservation Plan (0 automatic retries):');
+  console.log(JSON.stringify({
+    maxBudgetUsdMicros: rates.maxBudgetMicros,
+    totalPlannedReservationUsdMicros: rates.totalReservationMicros,
+    gemini: {
+      model: rates.geminiModel,
+      unitPriceUsdMicros: rates.geminiUnitMicros,
+      providerMaximumUsdMicros: rates.geminiProviderMaxMicros,
+      reservationUsdMicros: rates.geminiReservationMicros,
+    },
+    runway: {
+      model: rates.runwayModel,
+      durationSeconds: rates.runwayDurationSec,
+      unitPriceUsdMicrosPerSec: rates.runwayUnitMicros,
+      providerMaximumUsdMicros: rates.runwayProviderMaxMicros,
+      reservationUsdMicros: rates.runwayReservationMicros,
+    },
+    rateSourceRef: rates.sourceRef,
+  }, null, 2));
+
+  if (process.argv.includes('--confirm-spend')) {
+    return true;
+  }
+
+  const rl = readline.createInterface({ input, output });
+  try {
+    const answer = await rl.question('\nType "RUN" to execute PD-AT-01b (Gemini IMAGE) canary: ');
+    return answer.trim() === 'RUN';
+  } finally {
+    rl.close();
   }
 }
 
@@ -83,7 +185,19 @@ async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is required');
   }
+  const preflightCheckOnly = !readArg('gemini-rate-id') && !process.env.CANARY_GEMINI_RATE_ID;
+  if (preflightCheckOnly) {
+    // Validate explicit CLI/env rates before connecting to DB so missing args fail fast
+    await resolveCanaryRates();
+  }
   await migrateDatabase(process.env.DATABASE_URL);
+
+  const rates = await resolveCanaryRates();
+  const confirmed = await confirmSpendIfNeeded(rates);
+  if (!confirmed) {
+    console.log('[canary] Aborted before any API calls.');
+    return;
+  }
 
   const filmId = randomUUID();
   const storyRevisionId = randomUUID();
@@ -91,20 +205,20 @@ async function main(): Promise<void> {
   const shotId = randomUUID();
   const shotRevisionId = randomUUID();
   const validationRunId = randomUUID();
-  const geminiRateId = randomUUID();
-  const runwayRateId = randomUUID();
-  const budget = '5000000'; // $5.00 safety cap
 
   await pgClient.begin(async tx => {
     await tx`INSERT INTO films(id, title, brief, budget_limit_usd_micros, operator_id, idempotency_key, request_hash)
-      VALUES(${filmId}, 'Canary PD-05b Film', 'Cinematic neon cafe rain', ${budget}, 'local-operator', ${randomUUID()}, 'canary')`;
+      VALUES(${filmId}, 'Canary PD-05b Film', 'Cinematic neon cafe rain', ${rates.maxBudgetMicros}, 'local-operator', ${randomUUID()}, 'canary')`;
     await tx`INSERT INTO film_budget_accounts(film_id, operator_id, budget_limit_usd_micros)
-      VALUES(${filmId}, 'local-operator', ${budget})`;
+      VALUES(${filmId}, 'local-operator', ${rates.maxBudgetMicros})`;
     await tx`INSERT INTO budget_limit_events(id, film_id, actor_id, prior_limit_usd_micros, new_limit_usd_micros, reason)
-      VALUES(${randomUUID()}, ${filmId}, 'local-operator', ${budget}, ${budget}, 'canary baseline')`;
+      VALUES(${randomUUID()}, ${filmId}, 'local-operator', ${rates.maxBudgetMicros}, ${rates.maxBudgetMicros}, 'canary baseline')`;
 
     const storyContent = canonicalStoryV2();
-    const shotSpec = storyContent.scenes[0].shots[0].spec;
+    const shotSpec = {
+      ...storyContent.scenes[0].shots[0].spec,
+      durationSeconds: rates.runwayDurationSec,
+    };
     await tx`INSERT INTO story_revisions(id, film_id, revision_no, state, content, content_hash)
       VALUES(${storyRevisionId}, ${filmId}, 1, 'APPROVED', ${JSON.stringify({ content: storyContent })}::jsonb, 'canary-story-hash')`;
     await tx`UPDATE films SET active_story_revision_id=${storyRevisionId}, status='PLANNING' WHERE id=${filmId}`;
@@ -133,18 +247,20 @@ async function main(): Promise<void> {
     await tx`INSERT INTO story_revision_shots(film_id, story_revision_id, scene_id, shot_id, shot_revision_id, position)
       VALUES(${filmId}, ${storyRevisionId}, ${sceneId}, ${shotId}, ${shotRevisionId}, 1)`;
 
-    await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
-      VALUES(${geminiRateId}, 'GEMINI', 'gemini-3.1-flash-image', 'IMAGE', 'FIXED_PER_REQUEST', 67000, '2026-01-01', '2030-01-01', 'LIVE_VERIFIED canary operator attested')`;
-    await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
-      VALUES(${runwayRateId}, 'RUNWAY', 'gen4_turbo', 'VIDEO', 'PER_SECOND', 50000, '2026-01-01', '2030-01-01', 'LIVE_VERIFIED canary operator attested')`;
+    if (rates.createSnapshots) {
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, provider_maximum_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${rates.geminiRateId}, 'GEMINI', ${rates.geminiModel}, 'IMAGE', 'FIXED_PER_REQUEST', ${rates.geminiUnitMicros}, ${rates.geminiProviderMaxMicros}, '2026-01-01', '2030-01-01', ${rates.sourceRef})`;
+      await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, provider_maximum_usd_micros, effective_at, expires_at, source_ref)
+        VALUES(${rates.runwayRateId}, 'RUNWAY', ${rates.runwayModel}, 'VIDEO', 'PER_SECOND', ${rates.runwayUnitMicros}, ${rates.runwayProviderMaxMicros}, '2026-01-01', '2030-01-01', ${rates.sourceRef})`;
+    }
   });
 
-  // ── PD-AT-01b: Gemini Image Canary ─────────────────────────────────────
+  // ── PD-AT-01b: Gemini Image Canary (0 retries) ─────────────────────────
   const geminiPreview = await previewGeneration(filmId, 'local-operator', {
     storyRevisionId,
     shotRevisionId,
     kind: 'IMAGE',
-    rateCardSnapshotId: geminiRateId,
+    rateCardSnapshotId: rates.geminiRateId,
     pricingUnits: 1,
     executionMode: 'LIVE',
   });
@@ -152,7 +268,7 @@ async function main(): Promise<void> {
     storyRevisionId,
     shotRevisionId,
     kind: 'IMAGE',
-    rateCardSnapshotId: geminiRateId,
+    rateCardSnapshotId: rates.geminiRateId,
     pricingUnits: 1,
     executionMode: 'LIVE',
     expectedPreviewHash: geminiPreview.previewHash,
@@ -173,8 +289,8 @@ async function main(): Promise<void> {
       storyRevisionId,
       shotRevisionId,
       kind: 'VIDEO',
-      rateCardSnapshotId: runwayRateId,
-      pricingUnits: 5,
+      rateCardSnapshotId: rates.runwayRateId,
+      pricingUnits: rates.runwayDurationSec,
       executionMode: 'LIVE',
     });
   } catch {
@@ -196,29 +312,40 @@ async function main(): Promise<void> {
     waitUiMode,
   );
   if (!approved) {
+    const budgetState = await readBudget(filmId, 'local-operator');
+    const geminiFin = await readAttemptFinancial(geminiAdmitted.attemptId, 'local-operator');
+    const audit = await auditFinancialProjection(filmId);
     console.log(JSON.stringify({
       canaryStatus: 'ABORTED_AT_PRODUCER_GATE',
       runwaySubmits: 0,
-      gemini: { attemptId: geminiAdmitted.attemptId, sha256: kfAsset.sha256_hash },
+      filmId,
+      budget: budgetState,
+      auditMatches: audit.matches,
+      pdAt01b: {
+        attemptId: geminiAdmitted.attemptId,
+        model: rates.geminiModel,
+        sha256: kfAsset.sha256_hash,
+        financial: geminiFin,
+      },
     }, null, 2));
     return;
   }
 
-  // ── PD-AT-02b: Runway Video Canary ─────────────────────────────────────
+  // ── PD-AT-02b: Runway Video Canary (0 retries) ─────────────────────────
   const runwayPreview = await previewGeneration(filmId, 'local-operator', {
     storyRevisionId,
     shotRevisionId,
     kind: 'VIDEO',
-    rateCardSnapshotId: runwayRateId,
-    pricingUnits: 5,
+    rateCardSnapshotId: rates.runwayRateId,
+    pricingUnits: rates.runwayDurationSec,
     executionMode: 'LIVE',
   });
   const runwayAdmitted = await admitAttempt(filmId, 'local-operator', randomUUID(), {
     storyRevisionId,
     shotRevisionId,
     kind: 'VIDEO',
-    rateCardSnapshotId: runwayRateId,
-    pricingUnits: 5,
+    rateCardSnapshotId: rates.runwayRateId,
+    pricingUnits: rates.runwayDurationSec,
     executionMode: 'LIVE',
     expectedPreviewHash: runwayPreview.previewHash,
   });
@@ -227,35 +354,48 @@ async function main(): Promise<void> {
     throw new Error(`PD-AT-02b canary failed: ${JSON.stringify(runwayOutcome)}`);
   }
 
-  const [vidAsset] = await pgClient<{ id: string; sha256_hash: string }[]>`
-    SELECT id, sha256_hash FROM assets WHERE id = ${runwayOutcome.assetId}
+  const [vidAsset] = await pgClient<{ id: string; storage_path: string; sha256_hash: string }[]>`
+    SELECT id, storage_path, sha256_hash FROM assets WHERE id = ${runwayOutcome.assetId}
   `;
+  const budgetState = await readBudget(filmId, 'local-operator');
+  const geminiFin = await readAttemptFinancial(geminiAdmitted.attemptId, 'local-operator');
+  const runwayFin = await readAttemptFinancial(runwayAdmitted.attemptId, 'local-operator');
   const audit = await auditFinancialProjection(filmId);
 
   console.log(JSON.stringify({
     canaryStatus: 'COMPLETED',
     filmId,
+    budget: budgetState,
     auditMatches: audit.matches,
     pdAt01b: {
       attemptId: geminiAdmitted.attemptId,
       provider: 'GEMINI',
-      model: 'gemini-3.1-flash-image',
+      model: rates.geminiModel,
+      storagePath: kfAsset.storage_path,
       sha256: kfAsset.sha256_hash,
-      billingStatus: geminiOutcome.billingStatus,
+      financial: geminiFin,
     },
     pdAt02b: {
       attemptId: runwayAdmitted.attemptId,
       provider: 'RUNWAY',
-      model: 'gen4_turbo',
+      model: rates.runwayModel,
+      storagePath: vidAsset.storage_path,
       sha256: vidAsset.sha256_hash,
-      billingStatus: runwayOutcome.billingStatus,
+      financial: runwayFin,
     },
+    reconciliationNote: 'Verify actual usage on Google AI Studio & Runway dashboard, then POST /api/attempts/:attemptId/reconcile with billingStatus=FINAL and exact realizedChargeUsdMicros.',
   }, null, 2));
 }
 
 void main()
-  .catch(err => {
-    console.error('[canary] Failed:', err instanceof Error ? err.message : String(err));
+  .catch((err: unknown) => {
+    const e = err as { message?: string; code?: string; errors?: Array<{ message?: string }> } | undefined;
+    const msg =
+      (e?.message && e.message.trim()) ||
+      e?.errors?.map(x => x.message).filter(Boolean).join('; ') ||
+      e?.code ||
+      String(err);
+    console.error('[canary] Failed:', msg);
     process.exitCode = 1;
   })
   .finally(async () => {
