@@ -340,4 +340,69 @@ describe('Provider Dispatch Contracts (PD-01)', () => {
       startFrameProvenance: 'LOCAL_PIPELINE',
     })).toThrow();
   });
+
+  it('validates LIVE_PROVIDER inline keyframes LOCAL_STORAGE locator, billingEvidence, pollContinuation, and fal Queue contracts (PD-05b.1)', async () => {
+    const mod = await import('./providers.js');
+
+    const geminiLiveUpdate = {
+      providerJobId: `gemini:11111111-1111-4111-8111-111111111111:${'c'.repeat(64)}`,
+      state: 'SUCCEEDED',
+      provenance: 'LIVE_PROVIDER',
+      locator: {
+        kind: 'LOCAL_STORAGE',
+        category: 'keyframes',
+        filename: `${'c'.repeat(64)}.png`,
+        sha256: 'c'.repeat(64),
+      },
+      billingEvidence: {
+        status: 'PENDING',
+        evidenceRef: 'gemini:req-123',
+      },
+    };
+    const parsedGemini = mod.providerStatusUpdateSchema.parse(geminiLiveUpdate);
+    expect(parsedGemini.locator?.kind).toBe('LOCAL_STORAGE');
+    expect(parsedGemini.billingEvidence?.status).toBe('PENDING');
+
+    expect(mod.billingEvidenceSchema.parse({
+      status: 'CONFIRMED_CHARGED',
+      realizedChargeUsdMicros: '70000',
+      evidenceRef: 'runway:usage:1',
+    })).toMatchObject({ status: 'CONFIRMED_CHARGED', realizedChargeUsdMicros: '70000' });
+
+    expect(mod.billingEvidenceSchema.parse({
+      status: 'CONFIRMED_UNCHARGED',
+      evidenceRef: 'runway:void:1',
+    })).toMatchObject({ status: 'CONFIRMED_UNCHARGED' });
+
+    expect(() => mod.billingEvidenceSchema.parse({
+      status: 'CONFIRMED_CHARGED',
+      realizedChargeUsdMicros: '-100',
+      evidenceRef: 'bad',
+    })).toThrow();
+
+    expect(mod.pollContinuationPayloadSchema.parse({
+      kind: 'POLL_CONTINUATION',
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      providerJobId: 'runway-123',
+      turnNumber: 2,
+    })).toMatchObject({ turnNumber: 2 });
+
+    expect(() => mod.pollContinuationPayloadSchema.parse({
+      kind: 'POLL_CONTINUATION',
+      attemptId: '11111111-1111-4111-8111-111111111111',
+      providerJobId: 'runway-123',
+      turnNumber: 1,
+    })).toThrow();
+
+    expect(mod.falQueueSubmitResponseSchema.parse({
+      request_id: 'req-1',
+      status_url: 'https://queue.fal.run/fal-ai/kling/requests/req-1/status',
+      response_url: 'https://queue.fal.run/fal-ai/kling/requests/req-1',
+    }).request_id).toBe('req-1');
+
+    expect(mod.falQueueStatusResponseSchema.parse({ status: 'IN_PROGRESS' }).status).toBe('IN_PROGRESS');
+    expect(mod.falQueueResultResponseSchema.parse({
+      video: { url: 'https://v3.fal.media/files/out.mp4', content_type: 'video/mp4', file_size: 12345 },
+    }).video.url).toBe('https://v3.fal.media/files/out.mp4');
+  });
 });

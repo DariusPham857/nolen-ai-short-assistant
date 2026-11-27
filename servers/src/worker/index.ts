@@ -25,10 +25,11 @@ import {
   type ShutdownResult,
 } from "./shutdown.js";
 import { relayOne, type BossContract } from "../financial/outbox.js";
-import { recoverStaleSubmissions } from "../dispatch/service.js";
+import { recoverStaleSubmissions, recoverStaleSubmittedDispatches } from "../dispatch/service.js";
 import { completeReplayAttempt, handleUnsupportedKindAttempt } from "../dispatch/completion.js";
 import { completeLocalPanZoomAttempt } from "../dispatch/local-completion.js";
-import { pgClient } from "../db/index.js";
+import { completeLiveAttempt, type CompleteLiveAttemptOptions, type PollScheduler } from "../dispatch/live-completion.js";
+import { pollContinuationPayloadSchema } from "@nolen/contracts";
 import { ApiFailure } from "../http/errors.js";
 
 const env = getEnv();
@@ -41,6 +42,7 @@ export const REPLAY_QUEUES = [
 
 export const LIVE_QUEUES = [
   'live:generation:dispatch',
+  'live:generation:poll',
   'live:tts:dispatch',
   'live:assembly:dispatch',
 ] as const;
@@ -57,17 +59,20 @@ export interface BossJob<T = Record<string, unknown>> {
 }
 
 export interface WorkerOptions {
-  boss?: BossStopper & Partial<BossContract> & {
+  boss?: BossStopper & Partial<BossContract> & Partial<PollScheduler> & {
     start?: () => Promise<unknown>;
     on?: (event: string, handler: (err: unknown) => void) => void;
     work?: (name: string, handler: (jobs: unknown) => Promise<unknown>) => Promise<unknown>;
-    createQueue?: (name: string) => Promise<unknown>;
+    createQueue?: (name: string, options?: Record<string, unknown>) => Promise<unknown>;
   };
   tracker?: InFlightTracker;
   relayRunner?: WorkerLoopRunner;
   sweepRunner?: WorkerLoopRunner;
   registerSignals?: boolean;
   exitFn?: (code: number) => void;
+  liveCompletionOptions?: CompleteLiveAttemptOptions;
+  bossSchema?: string;
+  staleSubmittedThresholdMs?: number;
 }
 
 export interface RunningWorker {
@@ -119,12 +124,18 @@ export async function startWorker(options: WorkerOptions = {}): Promise<RunningW
   }
 
   const tracker = options.tracker ?? new InFlightTracker();
+  const shutdownAbortController = new AbortController();
+  const bossSchema = options.bossSchema ?? env.PGBOSS_SCHEMA;
 
   // ── Create production queues (both replay:* and live:*) ──
   // Fail closed: pg-boss createQueue is idempotent (ON CONFLICT DO NOTHING); any rejection is a genuine failure.
   if (boss.createQueue) {
     for (const q of ALL_PRODUCTION_QUEUES) {
-      await boss.createQueue(q);
+      if (q === 'live:generation:poll') {
+        await boss.createQueue(q, { name: q, policy: 'stately' });
+      } else {
+        await boss.createQueue(q);
+      }
     }
   }
 
@@ -170,7 +181,7 @@ export async function startWorker(options: WorkerOptions = {}): Promise<RunningW
       }
     });
 
-    // LIVE deterministic local generation queue (LP-001: LOCAL_PAN_ZOOM only; remote LIVE providers fail closed)
+    // LIVE generation queue (LOCAL_PAN_ZOOM + remote LIVE providers GEMINI/RUNWAY/FAL_KLING)
     await boss.work('live:generation:dispatch', async (jobs: unknown) => {
       for (const job of normalizeJobs(jobs)) {
         const payload = job.data as { request?: { attemptId?: string; provider?: string } } | undefined;
@@ -180,35 +191,37 @@ export async function startWorker(options: WorkerOptions = {}): Promise<RunningW
         }
         const provider = payload?.request?.provider;
         if (provider && provider !== 'LOCAL_PAN_ZOOM') {
-          await tracker.track((async () => {
-            await pgClient.begin(async tx => {
-              const [att] = await tx<{ state: string }[]>`
-                SELECT state FROM attempts WHERE id = ${attemptId} FOR UPDATE
-              `;
-              if (att && !['SUCCEEDED', 'FAILED', 'CANCELED'].includes(att.state)) {
-                await tx`
-                  UPDATE attempts
-                  SET state = 'FAILED'
-                  WHERE id = ${attemptId} AND state IN ('QUEUED', 'SUBMITTED', 'RUNNING')
-                `;
-                await tx`
-                  UPDATE outbound_dispatches
-                  SET state = 'FAILED', updated_at = now()
-                  WHERE attempt_id = ${attemptId} AND state NOT IN ('SUCCEEDED', 'FAILED')
-                `;
-              }
-              await tx`
-                UPDATE dispatch_outbox
-                SET status = 'DELIVERED',
-                    enqueue_outcome = 'WORKER_CONFIRMED',
-                    delivered_at = COALESCE(delivered_at, now())
-                WHERE attempt_id = ${attemptId}
-              `;
-            });
-          })());
+          await tracker.track(
+            completeLiveAttempt(attemptId, {
+              ...options.liveCompletionOptions,
+              boss: boss as unknown as PollScheduler,
+              signal: shutdownAbortController.signal,
+              turnNumber: 1,
+            }),
+          );
           continue;
         }
         await tracker.track(completeLocalPanZoomAttempt(attemptId));
+      }
+    });
+
+    // LIVE multi-turn polling continuation queue (dedicated payload contract; distinct job.id per turn)
+    await boss.work('live:generation:poll', async (jobs: unknown) => {
+      for (const job of normalizeJobs(jobs)) {
+        const parsed = pollContinuationPayloadSchema.safeParse(job.data);
+        if (!parsed.success) {
+          throw new ApiFailure(400, 'INVALID_POLL_PAYLOAD', 'Invalid live:generation:poll continuation payload');
+        }
+        const { attemptId, providerJobId, turnNumber } = parsed.data;
+        await tracker.track(
+          completeLiveAttempt(attemptId, {
+            ...options.liveCompletionOptions,
+            boss: boss as unknown as PollScheduler,
+            signal: shutdownAbortController.signal,
+            expectedProviderJobId: providerJobId,
+            turnNumber,
+          }),
+        );
       }
     });
   }
@@ -234,6 +247,13 @@ export async function startWorker(options: WorkerOptions = {}): Promise<RunningW
       passFn: async () => {
         try {
           await recoverStaleSubmissions();
+          if (typeof (boss as Partial<PollScheduler>).send === 'function') {
+            await recoverStaleSubmittedDispatches(
+              boss as unknown as PollScheduler,
+              bossSchema,
+              options.staleSubmittedThresholdMs,
+            );
+          }
         } catch (error) {
           console.error("[worker] Stale submission sweeper pass failed:", error);
         }
@@ -257,6 +277,7 @@ export async function startWorker(options: WorkerOptions = {}): Promise<RunningW
 
   const shutdown = async (): Promise<ShutdownResult> => {
     console.log("[worker] Shutting down...");
+    shutdownAbortController.abort();
     const result = await coordinator.shutdown();
     console.log(`[worker] Graceful shutdown complete (exitCode: ${result.exitCode}).`);
     exitFn(result.exitCode);

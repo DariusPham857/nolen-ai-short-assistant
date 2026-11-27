@@ -13,6 +13,8 @@ import { relayOne, type BossContract } from '../financial/outbox.js';
 import { fakeAssetProducer } from '../assets/repository.js';
 import { storage } from '../lib/storage.js';
 import { seedBaselineRateCards } from '../db/seed-rate-cards.js';
+import { computeRequestFingerprint, recoverStaleSubmittedDispatches } from '../dispatch/service.js';
+import type { PollScheduler } from '../dispatch/live-completion.js';
 
 function makeStaticPng320(): Buffer {
   const width = 320;
@@ -141,9 +143,9 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
         VALUES(${runwayRateId}, 'runway', 'gen4_turbo', 'VIDEO', 'PER_SECOND', 500000, '2026-01-01', '2027-01-01', 'runway-rate-snapshot')`;
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
-        VALUES(${ttsRateId}, 'LOCAL_PAN_ZOOM', 'test-tts', 'TTS', 'FIXED_PER_REQUEST', 10000, '2026-01-01', '2027-01-01', 'tts-rate-snapshot')`;
+        VALUES(${ttsRateId}, 'LOCAL_PAN_ZOOM', 'test-tts', 'TTS', 'FIXED_PER_REQUEST', 10000, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED tts-rate-snapshot')`;
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
-        VALUES(${assemblyRateId}, 'LOCAL_PAN_ZOOM', 'test-assembly', 'ASSEMBLY', 'FIXED_PER_REQUEST', 20000, '2026-01-01', '2027-01-01', 'assembly-rate-snapshot')`;
+        VALUES(${assemblyRateId}, 'LOCAL_PAN_ZOOM', 'test-assembly', 'ASSEMBLY', 'FIXED_PER_REQUEST', 20000, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED assembly-rate-snapshot')`;
 
       // 5. Pre-seed keyframe attempt
       await tx`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
@@ -328,10 +330,13 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       relayRunner,
       registerSignals: false,
       exitFn: () => {},
+      liveCompletionOptions: {
+        adapterOptions: { apiKey: '' },
+      },
     });
 
     try {
-      // LP-AT-04: Remote LIVE providers must be rejected at admission before dispatch
+      // Unverified remote rate cards must be rejected at admission before dispatch (PD-05b.7)
       await expect(
         previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
           storyRevisionId: s.storyRevisionId,
@@ -341,7 +346,7 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
           pricingUnits: 1,
           executionMode: 'LIVE',
         }),
-      ).rejects.toMatchObject({ status: 422, code: 'LIVE_PROVIDER_UNAVAILABLE' });
+      ).rejects.toMatchObject({ status: 422, code: 'UNVERIFIED_LIVE_RATE_CARD' });
 
       // 1. Admit 2 non-generation LIVE attempts: TTS (v1), ASSEMBLY (v1)
       const liveTts = await admitAttempt(s.filmId, 'local-operator', randomUUID(), {
@@ -469,6 +474,9 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       relayRunner,
       registerSignals: false,
       exitFn: () => {},
+      liveCompletionOptions: {
+        adapterOptions: { apiKey: '' },
+      },
     });
 
     try {
@@ -495,15 +503,27 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       });
       expect(storage.exists('videos', videoAsset.storage_path.replace('videos/', ''))).toBe(true);
 
-      // Verify unexpected remote LIVE payload on live:generation:dispatch fails closed
+      // Verify unconfigured remote LIVE payload on live:generation:dispatch fails closed without leaking reservation
       const badAttemptId = randomUUID();
+      const badReq = {
+        attemptId: badAttemptId,
+        filmId: s.filmId,
+        shotRevisionId: s.shotRevisionId,
+        kind: 'IMAGE' as const,
+        provider: 'GEMINI' as const,
+        executionMode: 'LIVE' as const,
+        prompt: 'Unconfigured live gemini key check',
+        aspectRatio: '9:16' as const,
+      };
+      const badFp = computeRequestFingerprint(badReq);
       await pgClient.begin(async tx => {
         await tx`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
           VALUES(${badAttemptId}, ${s.filmId}, ${s.storyRevisionId}, ${s.shotRevisionId}, 'IMAGE', 'GEMINI', 'gemini-3.1-flash-image', ${s.geminiRateId}, 1, '200000', 'QUEUED', 'LIVE')`;
         await tx`INSERT INTO attempt_financial_state(attempt_id, billing_status, reservation_open_usd_micros)
           VALUES(${badAttemptId}, 'PENDING', '200000')`;
+        await tx`UPDATE film_budget_accounts SET reserved_open_usd_micros = reserved_open_usd_micros + 200000 WHERE film_id = ${s.filmId}`;
         await tx`INSERT INTO dispatch_outbox(id, attempt_id, queue_name, payload, status, enqueue_outcome)
-          VALUES(${randomUUID()}, ${badAttemptId}, 'live:generation:dispatch', ${JSON.stringify({ request: { attemptId: badAttemptId, provider: 'GEMINI' } })}::jsonb, 'PENDING', 'NOT_ATTEMPTED')`;
+          VALUES(${randomUUID()}, ${badAttemptId}, 'live:generation:dispatch', ${JSON.stringify({ request: badReq, requestFingerprint: badFp })}::jsonb, 'PENDING', 'NOT_ATTEMPTED')`;
       });
 
       const badTerminal = await pollAttemptState(badAttemptId, 10000);
@@ -601,6 +621,9 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
       relayRunner,
       registerSignals: false,
       exitFn: () => {},
+      liveCompletionOptions: {
+        adapterOptions: { apiKey: '' },
+      },
     });
 
     try {
@@ -614,6 +637,338 @@ describe.runIf(isLiveDb)('Gate 3: Worker Runtime Integration & Lifecycle (Postgr
         SELECT id FROM assets WHERE attempt_id IN (${att1.attemptId}, ${att2.attemptId})
       `;
       expect(assets).toHaveLength(2);
+    } finally {
+      await worker.shutdown();
+      await pgClient.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 4. PD-05b Real pg-boss Multi-Turn Polling, SIGTERM Resumption & Sweeper Rescue
+  // ───────────────────────────────────────────────────────────────────────────
+  async function seedLiveRunwayOutboxAttempt(s: Awaited<ReturnType<typeof seedWorkerSetup>>, reservation = '100000') {
+    const attemptId = randomUUID();
+    const req = {
+      attemptId,
+      filmId: s.filmId,
+      shotRevisionId: s.shotRevisionId,
+      kind: 'VIDEO' as const,
+      provider: 'RUNWAY' as const,
+      executionMode: 'LIVE' as const,
+      prompt: 'Slow cinematic dolly',
+      aspectRatio: '9:16' as const,
+      durationSeconds: 5,
+    };
+    const fp = computeRequestFingerprint(req);
+    await pgClient.begin(async tx => {
+      await tx`INSERT INTO attempts(id, film_id, story_revision_id, shot_revision_id, kind, provider, model, rate_card_snapshot_id, pricing_units, reservation_usd_micros, state, execution_mode)
+        VALUES(${attemptId}, ${s.filmId}, ${s.storyRevisionId}, ${s.shotRevisionId}, 'VIDEO', 'RUNWAY', 'gen4_turbo', ${s.runwayRateId}, 5, ${reservation}, 'QUEUED', 'LIVE')`;
+      await tx`INSERT INTO attempt_financial_state(attempt_id, billing_status, reservation_open_usd_micros)
+        VALUES(${attemptId}, 'PENDING', ${reservation})`;
+      await tx`INSERT INTO cost_ledger_events(id, film_id, attempt_id, event_type, amount_usd_micros, billing_status, evidence, created_at)
+        VALUES(${randomUUID()}, ${s.filmId}, ${attemptId}, 'RESERVATION_CREATED', ${reservation}, 'PENDING', '{}'::jsonb, clock_timestamp())`;
+      await tx`UPDATE film_budget_accounts SET reserved_open_usd_micros = reserved_open_usd_micros + ${reservation}::bigint WHERE film_id = ${s.filmId}`;
+      await tx`INSERT INTO dispatch_outbox(id, attempt_id, queue_name, payload, status, enqueue_outcome)
+        VALUES(${randomUUID()}, ${attemptId}, 'live:generation:dispatch', ${JSON.stringify({ request: req, requestFingerprint: fp })}::jsonb, 'PENDING', 'NOT_ATTEMPTED')`;
+    });
+    return attemptId;
+  }
+
+  it('v7 BLOCK 2: routes Turn 1 RUNNING -> Turn 2 live:generation:poll SUCCEEDED via real pg-boss with exactly 1 submit', async () => {
+    await pgClient`UPDATE dispatch_outbox SET status='DELIVERED', enqueue_outcome='WORKER_CONFIRMED', delivered_at=now() WHERE status = 'PENDING'`;
+    const s = await seedWorkerSetup();
+    const attemptId = await seedLiveRunwayOutboxAttempt(s);
+
+    let submitCount = 0;
+    let pollCount = 0;
+    const videoBytes = Buffer.from('runway-turn2-mp4');
+    const adapter = {
+      kind: 'RUNWAY' as const,
+      executionMode: 'LIVE' as const,
+      isFake: false as const,
+      submit: async (req: { attemptId: string }) => {
+        submitCount++;
+        return {
+          attemptId: req.attemptId,
+          providerJobId: 'rw-multiturn-1',
+          state: 'SUBMITTED' as const,
+          executionMode: 'LIVE' as const,
+          provenance: 'LIVE_PROVIDER' as const,
+          submittedAt: new Date().toISOString(),
+        };
+      },
+      pollStatus: async (jobId: string) => {
+        pollCount++;
+        if (pollCount <= 2) {
+          return { providerJobId: jobId, state: 'RUNNING' as const, provenance: 'LIVE_PROVIDER' as const };
+        }
+        return {
+          providerJobId: jobId,
+          state: 'SUCCEEDED' as const,
+          provenance: 'LIVE_PROVIDER' as const,
+          mediaUrl: 'https://cdn.runwayml.com/multiturn.mp4',
+          billingEvidence: { status: 'CONFIRMED_CHARGED' as const, realizedChargeUsdMicros: '80000', evidenceRef: 'rw:mt:1' },
+        };
+      },
+      reconcile: async (id: string, jid: string | null) => ({ attemptId: id, providerJobId: jid, outcome: 'CONFIRMED_SUCCEEDED' as const, evidence: 'ok' }),
+    };
+
+    const schema = `wb_${randomUUID().replaceAll('-', '').slice(0, 20)}`;
+    const boss = new PgBoss({ connectionString: process.env.DATABASE_URL!, schema });
+    boss.on('error', () => undefined);
+
+    const worker = await startWorker({
+      boss: boss as unknown as WorkerOptions['boss'],
+      bossSchema: schema,
+      relayRunner: new WorkerLoopRunner({
+        intervalMs: 100,
+        passFn: async () => {
+          await relayOne(boss as unknown as BossContract).catch(() => undefined);
+        },
+      }),
+      registerSignals: false,
+      exitFn: () => {},
+      liveCompletionOptions: {
+        adapter,
+        turnPollBudgetMs: 10, // Force Turn 1 expiration cleanly
+        pollIntervalMs: 30,
+        turnRescheduleDelaySec: 0,
+        lookupFn: async () => [{ address: '34.120.0.1', family: 4 }],
+        downloadTransportFn: async () => ({
+          statusCode: 200,
+          headers: { 'content-type': 'video/mp4', 'content-length': String(videoBytes.byteLength) },
+          stream: (async function* () { yield videoBytes; })(),
+          destroy: () => undefined,
+        }),
+      },
+    });
+
+    try {
+      const terminal = await pollAttemptState(attemptId, 15_000);
+      expect(terminal).toBe('SUCCEEDED');
+      expect(submitCount).toBe(1);
+      expect(pollCount).toBeGreaterThanOrEqual(3);
+
+      const pollJobs = await pgClient<{ id: string; state: string }[]>`
+        SELECT id, state::text FROM ${pgClient.unsafe(`"${schema}".job`)}
+        WHERE name = 'live:generation:poll' AND data->>'attemptId' = ${attemptId}
+      `;
+      expect(pollJobs.length).toBeGreaterThanOrEqual(1);
+      expect(pollJobs[0].id).not.toBe(attemptId); // Distinct job.id on live:generation:poll
+      expect(pollJobs.some(j => j.state === 'completed')).toBe(true);
+    } finally {
+      await worker.shutdown();
+      await pgClient.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    }
+  });
+
+  it('v7 BLOCK 3: SIGTERM shutdown during active RUNNING poll durably schedules live:generation:poll and Worker 2 completes with 1 submit', async () => {
+    await pgClient`UPDATE dispatch_outbox SET status='DELIVERED', enqueue_outcome='WORKER_CONFIRMED', delivered_at=now() WHERE status = 'PENDING'`;
+    const s = await seedWorkerSetup();
+    const attemptId = await seedLiveRunwayOutboxAttempt(s);
+
+    let submitCount = 0;
+    let phase: 'WORKER_1' | 'WORKER_2' = 'WORKER_1';
+    let firstPollHit!: () => void;
+    const firstPollReady = new Promise<void>(r => { firstPollHit = r; });
+
+    const videoBytes = Buffer.from('runway-sigterm-mp4');
+    const adapter = {
+      kind: 'RUNWAY' as const,
+      executionMode: 'LIVE' as const,
+      isFake: false as const,
+      submit: async (req: { attemptId: string }) => {
+        submitCount++;
+        return {
+          attemptId: req.attemptId,
+          providerJobId: 'rw-sigterm-1',
+          state: 'SUBMITTED' as const,
+          executionMode: 'LIVE' as const,
+          provenance: 'LIVE_PROVIDER' as const,
+          submittedAt: new Date().toISOString(),
+        };
+      },
+      pollStatus: async (jobId: string) => {
+        if (phase === 'WORKER_1') {
+          firstPollHit();
+          return { providerJobId: jobId, state: 'RUNNING' as const, provenance: 'LIVE_PROVIDER' as const };
+        }
+        return {
+          providerJobId: jobId,
+          state: 'SUCCEEDED' as const,
+          provenance: 'LIVE_PROVIDER' as const,
+          mediaUrl: 'https://cdn.runwayml.com/sigterm.mp4',
+          billingEvidence: { status: 'CONFIRMED_CHARGED' as const, realizedChargeUsdMicros: '80000', evidenceRef: 'rw:sigterm:1' },
+        };
+      },
+      reconcile: async (id: string, jid: string | null) => ({ attemptId: id, providerJobId: jid, outcome: 'CONFIRMED_SUCCEEDED' as const, evidence: 'ok' }),
+    };
+
+    const schema = `wb_${randomUUID().replaceAll('-', '').slice(0, 20)}`;
+    const boss1 = new PgBoss({ connectionString: process.env.DATABASE_URL!, schema });
+    boss1.on('error', () => undefined);
+
+    const worker1 = await startWorker({
+      boss: boss1 as unknown as WorkerOptions['boss'],
+      bossSchema: schema,
+      relayRunner: new WorkerLoopRunner({
+        intervalMs: 100,
+        passFn: async () => { await relayOne(boss1 as unknown as BossContract).catch(() => undefined); },
+      }),
+      registerSignals: false,
+      exitFn: () => {},
+      liveCompletionOptions: {
+        adapter,
+        pollIntervalMs: 5_000, // Sleep interrupted by shutdown signal
+        shutdownRescheduleDelaySec: 0,
+      },
+    });
+
+    await firstPollReady;
+    const shutdownRes = await worker1.shutdown();
+    expect(shutdownRes.exitCode).toBe(0);
+
+    // Boot Worker 2 on same schema
+    phase = 'WORKER_2';
+    const boss2 = new PgBoss({ connectionString: process.env.DATABASE_URL!, schema });
+    boss2.on('error', () => undefined);
+    const worker2 = await startWorker({
+      boss: boss2 as unknown as WorkerOptions['boss'],
+      bossSchema: schema,
+      relayRunner: new WorkerLoopRunner({ intervalMs: 100, passFn: async () => {} }),
+      registerSignals: false,
+      exitFn: () => {},
+      liveCompletionOptions: {
+        adapter,
+        lookupFn: async () => [{ address: '34.120.0.1', family: 4 }],
+        downloadTransportFn: async () => ({
+          statusCode: 200,
+          headers: { 'content-type': 'video/mp4', 'content-length': String(videoBytes.byteLength) },
+          stream: (async function* () { yield videoBytes; })(),
+          destroy: () => undefined,
+        }),
+      },
+    });
+
+    try {
+      const terminal = await pollAttemptState(attemptId, 15_000);
+      expect(terminal).toBe('SUCCEEDED');
+      expect(submitCount).toBe(1);
+    } finally {
+      await worker2.shutdown();
+      await pgClient.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    }
+  });
+
+  it('v8 BLOCK 3: continuation enqueue retry exhaustion fails job to failed, then recoverStaleSubmittedDispatches rescues video with 1 submit', async () => {
+    await pgClient`UPDATE dispatch_outbox SET status='DELIVERED', enqueue_outcome='WORKER_CONFIRMED', delivered_at=now() WHERE status = 'PENDING'`;
+    const s = await seedWorkerSetup();
+    const attemptId = await seedLiveRunwayOutboxAttempt(s);
+
+    let submitCount = 0;
+    let allowPollSuccess = false;
+    const videoBytes = Buffer.from('runway-rescued-mp4');
+    const adapter = {
+      kind: 'RUNWAY' as const,
+      executionMode: 'LIVE' as const,
+      isFake: false as const,
+      submit: async (req: { attemptId: string }) => {
+        submitCount++;
+        return {
+          attemptId: req.attemptId,
+          providerJobId: 'rw-rescue-1',
+          state: 'SUBMITTED' as const,
+          executionMode: 'LIVE' as const,
+          provenance: 'LIVE_PROVIDER' as const,
+          submittedAt: new Date().toISOString(),
+        };
+      },
+      pollStatus: async (jobId: string) => {
+        if (!allowPollSuccess) {
+          return { providerJobId: jobId, state: 'RUNNING' as const, provenance: 'LIVE_PROVIDER' as const };
+        }
+        return {
+          providerJobId: jobId,
+          state: 'SUCCEEDED' as const,
+          provenance: 'LIVE_PROVIDER' as const,
+          mediaUrl: 'https://cdn.runwayml.com/rescued.mp4',
+          billingEvidence: { status: 'CONFIRMED_CHARGED' as const, realizedChargeUsdMicros: '80000', evidenceRef: 'rw:rescue:1' },
+        };
+      },
+      reconcile: async (id: string, jid: string | null) => ({ attemptId: id, providerJobId: jid, outcome: 'CONFIRMED_SUCCEEDED' as const, evidence: 'ok' }),
+    };
+
+    const schema = `wb_${randomUUID().replaceAll('-', '').slice(0, 20)}`;
+    const boss = new PgBoss({ connectionString: process.env.DATABASE_URL!, schema });
+    boss.on('error', () => undefined);
+    await boss.start();
+
+    // Provision live:generation:dispatch with retryLimit=2, retryDelay=0 so retry exhaustion reaches 'failed' quickly
+    await boss.createQueue('live:generation:dispatch', { name: 'live:generation:dispatch', retryLimit: 2, retryDelay: 0 });
+
+    let injectSendFailure = true;
+    const originalSend = boss.send.bind(boss);
+    vi.spyOn(boss, 'send').mockImplementation(async (name: string, data?: object, opts?: PgBoss.SendOptions) => {
+      if (name === 'live:generation:poll' && injectSendFailure) {
+        throw new Error('Simulated transient queue outage on continuation send');
+      }
+      return originalSend(name, data ?? {}, opts ?? {});
+    });
+
+    const worker = await startWorker({
+      boss: boss as unknown as WorkerOptions['boss'],
+      bossSchema: schema,
+      relayRunner: new WorkerLoopRunner({
+        intervalMs: 100,
+        passFn: async () => { await relayOne(boss as unknown as BossContract).catch(() => undefined); },
+      }),
+      sweepRunner: new WorkerLoopRunner({ intervalMs: 60_000, passFn: async () => {} }),
+      registerSignals: false,
+      exitFn: () => {},
+      liveCompletionOptions: {
+        adapter,
+        turnPollBudgetMs: 1,
+        pollIntervalMs: 10,
+        turnRescheduleDelaySec: 0,
+        lookupFn: async () => [{ address: '34.120.0.1', family: 4 }],
+        downloadTransportFn: async () => ({
+          statusCode: 200,
+          headers: { 'content-type': 'video/mp4', 'content-length': String(videoBytes.byteLength) },
+          stream: (async function* () { yield videoBytes; })(),
+          destroy: () => undefined,
+        }),
+      },
+    });
+
+    try {
+      // Wait for initial dispatch + 2 retries to exhaust -> job state = 'failed'
+      const deadline = Date.now() + 10_000;
+      let jobState = '';
+      while (Date.now() < deadline) {
+        const [j] = await pgClient<{ state: string }[]>`
+          SELECT state::text FROM ${pgClient.unsafe(`"${schema}".job`)}
+          WHERE name = 'live:generation:dispatch' AND id = ${attemptId}
+        `;
+        if (j?.state === 'failed') {
+          jobState = j.state;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      expect(jobState).toBe('failed');
+      expect(submitCount).toBe(1); // Only 1 submit across all 3 tries because provider_job_id persisted on try 1!
+
+      // Queue recovers and Runway finishes rendering
+      injectSendFailure = false;
+      allowPollSuccess = true;
+      await new Promise(r => setTimeout(r, 50));
+
+      const rescued = await recoverStaleSubmittedDispatches(boss as unknown as PollScheduler, schema, 10);
+      expect(rescued.some(r => r.attemptId === attemptId && r.recovered)).toBe(true);
+
+      const terminal = await pollAttemptState(attemptId, 15_000);
+      expect(terminal).toBe('SUCCEEDED');
+      expect(submitCount).toBe(1);
     } finally {
       await worker.shutdown();
       await pgClient.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

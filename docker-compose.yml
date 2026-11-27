@@ -3,7 +3,7 @@ x-app: &app
   image: nolen-fc001:local
   environment: &env
     DATABASE_URL: postgresql://nolen:nolen_dev@db:5432/nolen_film
-    EXECUTION_MODE: REPLAY
+    EXECUTION_MODE: ${EXECUTION_MODE:-REPLAY}
     STORAGE_BASE_PATH: /app/storage
 
 services:
@@ -33,6 +33,11 @@ services:
     environment:
       <<: *env
       OPERATOR_TOKEN: ${OPERATOR_TOKEN:?Set OPERATOR_TOKEN to a random secret of at least 32 bytes}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_NO_BILLING_ATTESTED: ${GEMINI_NO_BILLING_ATTESTED:-}
+      GEMINI_FREE_PLANNER_MODEL: ${GEMINI_FREE_PLANNER_MODEL:-}
+      RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
+      FAL_API_KEY: ${FAL_API_KEY:-}
     ports:
       - '127.0.0.1:3000:3000'
     volumes:
@@ -48,6 +53,11 @@ services:
   worker:
     <<: *app
     command: [pnpm, --filter, '@nolen/server', 'worker:start']
+    environment:
+      <<: *env
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
+      FAL_API_KEY: ${FAL_API_KEY:-}
     volumes:
       - media_storage:/app/storage
     depends_on:

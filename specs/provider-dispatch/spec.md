@@ -141,9 +141,9 @@ stateDiagram-v2
 - `PD-AT-13`: Deterministic default fixture frozen at admission -> Omitted `fixtureId` resolved to default and frozen in snapshot/payload; changing default later does not affect queued attempt.
 - `PD-AT-14`: Worker graceful shutdown -> Clears loop timers via `clearTimeout` and awaits in-flight relay pass before stopping `pg-boss`.
 
-### PD-05b (Deferred to LIVE Provider Integration):
-- `PD-AT-01b`: LIVE image generation -> Real Gemini API -> Remote media download -> SSRF check passes -> SHA-256 verified -> Asset registered -> Actual charge posted -> Reservation released.
-- `PD-AT-02b`: LIVE video generation -> Keyframe asset reference passed -> Real Runway API polls to success -> Remote media download -> Video asset registered -> Charge settled.
+### PD-05b (LIVE Provider Integration & Gate 3):
+- `PD-AT-01b`: LIVE image generation -> Real Gemini API -> Pathway A (Inline base64 decode to storage) -> SHA-256 verified -> Asset registered in `PENDING_REVIEW` -> Charge settled / reconciled -> Reservation released.
+- `PD-AT-02b`: LIVE video generation -> Producer-approved keyframe reference passed -> Real Runway API polls to success -> Pathway B (SSRF-contained pinned stream download) -> SHA-256 verified -> Video asset registered -> Charge settled.
 
 ## Open Questions / Blocked Contracts
 

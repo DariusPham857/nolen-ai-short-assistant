@@ -16,6 +16,7 @@
     "check:evidence": "node scripts/check-evidence.mjs",
     "planner:preflight": "pnpm --filter @nolen/server planner:preflight",
     "planner:smoke": "pnpm --filter @nolen/server planner:smoke",
+    "dispatch:canary:smoke": "pnpm --filter @nolen/server exec tsx ../scripts/canary-live-dispatch.ts",
     "test:evidence": "node --test scripts/check-evidence.test.mjs",
     "db:migrate": "pnpm --filter @nolen/server db:migrate",
     "db:seed": "pnpm --filter @nolen/server db:seed"

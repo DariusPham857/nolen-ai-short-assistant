@@ -142,6 +142,57 @@ function resolveProviderKind(rawProviderName: string): ProviderKind {
   throw new ApiFailure(422, 'UNSUPPORTED_PROVIDER', `Unsupported rate card provider: ${rawProviderName}`);
 }
 
+function assertProviderCredentialsConfigured(provider: ProviderKind): void {
+  if (provider === 'GEMINI') {
+    if (!process.env.GEMINI_API_KEY?.trim()) {
+      throw new ApiFailure(422, 'LIVE_CREDENTIALS_MISSING', 'LIVE execution for GEMINI requires GEMINI_API_KEY');
+    }
+    return;
+  }
+  if (provider === 'RUNWAY') {
+    if (!process.env.RUNWAY_API_KEY?.trim()) {
+      throw new ApiFailure(422, 'LIVE_CREDENTIALS_MISSING', 'LIVE execution for RUNWAY requires RUNWAY_API_KEY');
+    }
+    return;
+  }
+  if (provider === 'FAL_KLING') {
+    const key = (process.env.FAL_API_KEY ?? process.env.FAL_KEY ?? '').trim();
+    if (!key) {
+      throw new ApiFailure(422, 'LIVE_CREDENTIALS_MISSING', 'LIVE execution for FAL_KLING requires FAL_API_KEY');
+    }
+  }
+}
+
+/** Enforces strict provider-to-rate-card pairing and credential checks for LIVE execution across all admission paths. */
+function assertLiveRateCardAndCredentials(provider: ProviderKind, rate: RateRow): void {
+  if (provider === 'LOCAL_PAN_ZOOM') {
+    if (!rate.source_ref.startsWith('LOCAL_VERIFIED')) {
+      throw new ApiFailure(
+        422,
+        'UNVERIFIED_LIVE_RATE_CARD',
+        'LOCAL_PAN_ZOOM requires a LOCAL_VERIFIED rate card in LIVE mode',
+      );
+    }
+    return;
+  }
+
+  if (rate.source_ref.startsWith('LOCAL_VERIFIED')) {
+    throw new ApiFailure(
+      422,
+      'RATE_CARD_PROVIDER_MISMATCH',
+      'Remote providers cannot use LOCAL_VERIFIED rate cards',
+    );
+  }
+  if (rate.source_ref.includes('MODELED_ONLY') || !rate.source_ref.startsWith('LIVE_VERIFIED')) {
+    throw new ApiFailure(
+      422,
+      'UNVERIFIED_LIVE_RATE_CARD',
+      'Remote LIVE execution requires a LIVE_VERIFIED rate card',
+    );
+  }
+  assertProviderCredentialsConfigured(provider);
+}
+
 interface AuthoritativeMediaResolution {
   template: GenerationRequestTemplateV2;
   previewHash: string;
@@ -222,19 +273,8 @@ async function resolveAuthoritativeMediaTemplate(
   const provider = resolveProviderKind(rate.provider);
   const executionMode = input.executionMode ?? 'REPLAY';
   const isReplay = executionMode === 'REPLAY';
-  if (!isReplay && provider !== 'LOCAL_PAN_ZOOM') {
-    throw new ApiFailure(
-      422,
-      'LIVE_PROVIDER_UNAVAILABLE',
-      `LIVE execution for ${provider} is not configured yet; only LOCAL_PAN_ZOOM supports LIVE execution`,
-    );
-  }
-  if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
-    throw new ApiFailure(
-      422,
-      'UNVERIFIED_LIVE_RATE_CARD',
-      'Modeled rate cards are for REPLAY/development only and cannot be admitted for LIVE execution',
-    );
+  if (!isReplay) {
+    assertLiveRateCardAndCredentials(provider, rate);
   }
 
   if (input.kind === 'VIDEO' && rate.rate_type === 'PER_SECOND' && input.pricingUnits !== parsedShot.data.durationSeconds) {
@@ -422,14 +462,10 @@ export async function admitAttempt(filmId:string,operatorId:string,key:string,in
       }
       rate=await loadRate(tx,input.rateCardSnapshotId);
       if(rate.operation!==input.kind)throw new ApiFailure(422,'RATE_CARD_UNSUPPORTED','Rate card does not support this attempt kind');
-      if (!isReplay && rate.source_ref.includes('MODELED_ONLY')) {
-        throw new ApiFailure(
-          422,
-          'UNVERIFIED_LIVE_RATE_CARD',
-          'Modeled rate cards are for REPLAY/development only and cannot be admitted for LIVE execution',
-        );
-      }
       provider = resolveProviderKind(rate.provider);
+      if (!isReplay) {
+        assertLiveRateCardAndCredentials(provider, rate);
+      }
       if (input.shotRevisionId) {
         const [sr] = await tx<{ spec: { prompt?: string } }[]>`SELECT spec FROM shot_revisions WHERE id = ${input.shotRevisionId} AND film_id = ${filmId}`;
         v1Prompt = sr?.spec?.prompt ?? '';

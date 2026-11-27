@@ -96,9 +96,9 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
         VALUES(${falRateId}, 'fal_kling', 'fal-ai/kling-video/v3/pro/image-to-video', 'VIDEO', 'PER_SECOND', 500000, '2026-01-01', '2027-01-01', 'fal-rate-snapshot')`;
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
-        VALUES(${ttsRateId}, 'LOCAL_PAN_ZOOM', 'test-tts', 'TTS', 'FIXED_PER_REQUEST', 10000, '2026-01-01', '2027-01-01', 'tts-rate-snapshot')`;
+        VALUES(${ttsRateId}, 'LOCAL_PAN_ZOOM', 'test-tts', 'TTS', 'FIXED_PER_REQUEST', 10000, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED tts-rate-snapshot')`;
       await tx`INSERT INTO rate_card_snapshots(id, provider, model, operation, rate_type, unit_price_usd_micros, effective_at, expires_at, source_ref)
-        VALUES(${assemblyRateId}, 'LOCAL_PAN_ZOOM', 'test-assembly', 'ASSEMBLY', 'FIXED_PER_REQUEST', 20000, '2026-01-01', '2027-01-01', 'assembly-rate-snapshot')`;
+        VALUES(${assemblyRateId}, 'LOCAL_PAN_ZOOM', 'test-assembly', 'ASSEMBLY', 'FIXED_PER_REQUEST', 20000, '2026-01-01', '2027-01-01', 'LOCAL_VERIFIED assembly-rate-snapshot')`;
     });
 
     return {
@@ -326,7 +326,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
     `;
     expect(outboxReplayAssembly.queue_name).toBe('replay:assembly:dispatch');
 
-    // Remote providers reject LIVE admission with 422 LIVE_PROVIDER_UNAVAILABLE until PD-05b-CORE (LP-AT-04)
+    // Unverified remote rate cards reject LIVE admission with 422 UNVERIFIED_LIVE_RATE_CARD (PD-05b.7)
     await expect(
       previewAndAdmitMediaAttempt(s.filmId, 'local-operator', randomUUID(), {
         storyRevisionId: s.storyRevisionId,
@@ -336,7 +336,7 @@ describe.runIf(isLiveDb)('Gate 2: Idempotent Completion Service & Concurrency/Cr
         pricingUnits: 1,
         executionMode: 'LIVE',
       }),
-    ).rejects.toMatchObject({ status: 422, code: 'LIVE_PROVIDER_UNAVAILABLE' });
+    ).rejects.toMatchObject({ status: 422, code: 'UNVERIFIED_LIVE_RATE_CARD' });
 
     // Verified LIVE LOCAL_PAN_ZOOM VIDEO routes cleanly to live:generation:dispatch after START_FRAME approval
     const localVideoRateId = randomUUID();
