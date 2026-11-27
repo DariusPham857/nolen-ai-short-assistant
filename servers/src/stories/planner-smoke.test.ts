@@ -142,11 +142,15 @@ describe('FP-04 / FP-AT-06 planner smoke CLI & runner (R0/R1)', () => {
     expect(res.summary.scenesCount).toBe(1);
     expect(res.summary.shotsCount).toBe(1);
     expect(res.summary.findingsBySeverity.WARNING).toBeGreaterThanOrEqual(1); // 30s vs 45s target
+    expect(res.summary.findings).toEqual([
+      { code: 'TARGET_DURATION', path: 'duration', severity: 'WARNING', waivable: false },
+    ]);
     expect(res.summary.billingModel).toBe('operator-attested');
     expect(res.summary.errorCode).toBeNull();
     const serialized = JSON.stringify(res.summary);
     expect(serialized).not.toContain('fake-secret-token-xyz');
     expect(serialized).not.toContain('Secret creative script text');
+    expect(serialized).not.toContain('differs from target');
     expect(serialized).not.toContain('actualCost');
   });
 

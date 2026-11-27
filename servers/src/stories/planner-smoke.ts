@@ -9,6 +9,13 @@ import {
 
 export type SmokeStatus = 'SKIPPED' | 'BLOCKED' | 'PASS' | 'FAIL';
 
+export type SmokeFindingSummary = {
+  code: string;
+  path: string;
+  severity: 'ERROR' | 'WARNING';
+  waivable: boolean;
+};
+
 export type SmokeSummary = {
   status: SmokeStatus;
   timestampUtc: string;
@@ -20,6 +27,7 @@ export type SmokeSummary = {
   scenesCount: number;
   shotsCount: number;
   findingsBySeverity: { ERROR: number; WARNING: number };
+  findings: SmokeFindingSummary[];
   errorCode: string | null;
 };
 
@@ -99,6 +107,7 @@ export async function runPlannerSmoke(
     scenesCount: 0,
     shotsCount: 0,
     findingsBySeverity: { ERROR: 0, WARNING: 0 },
+    findings: [],
     errorCode: null,
     ...overrides,
   });
@@ -159,6 +168,12 @@ export async function runPlannerSmoke(
       ERROR: result.findings.filter(f => f.severity === 'ERROR').length,
       WARNING: result.findings.filter(f => f.severity === 'WARNING').length,
     };
+    const findings: SmokeFindingSummary[] = result.findings.map(f => ({
+      code: f.code,
+      path: f.path,
+      severity: f.severity,
+      waivable: f.waivable,
+    }));
 
     return {
       exitCode: 0,
@@ -168,6 +183,7 @@ export async function runPlannerSmoke(
         scenesCount,
         shotsCount,
         findingsBySeverity,
+        findings,
       }),
     };
   } catch (err) {

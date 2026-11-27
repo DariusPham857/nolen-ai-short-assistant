@@ -1,6 +1,6 @@
 # FREE-PLAN-01 tasks
 
-Status: CI_VERIFIED_PENDING_LIVE_SMOKE
+Status: VERIFIED_LIVE_SMOKE_PASS
 Source: [spec](spec.md)
 
 ## Tasks
@@ -12,7 +12,7 @@ Source: [spec](spec.md)
 | FP-02a | R0 | REQUIRED (depends on FP-00) | Billing attestation guard (`=== "true"`), pinned model guard, `pnpm planner:preflight` | `servers/src/stories/free-planner.test.ts` (`PASS`, 5/5) |
 | FP-02b | R1 | REQUIRED (depends on FP-01, FP-02a) | Gemini native `fetch` adapter, 512 KiB stream cap, error mapping, pure validator findings | `servers/src/stories/free-planner.test.ts` (`PASS`, 5/5) |
 | FP-03 | R1 | REQUIRED (depends on FP-01, FP-02b) | Storyboard `Generate story with Gemini` UI, versioned draft envelope, stale findings | `typecheck` & `lint` `PASS`; production browser suite `PASS`, 19/19, including `FP-AT-05` / `FP-AT-05b` at `3d5ad01` (CI evidence below) |
-| FP-04 | R1 | REQUIRED (depends on FP-01..FP-03) | Quality gates, evidence checks, `pnpm planner:smoke` opt-in CLI + shared transport hardening (`redirect: 'error'`, 60s body-read deadline) | Automated `vitest` (`free-planner.test.ts`, `planner-smoke.test.ts`), `typecheck`, `lint`, `check:evidence` `PASS`; live `FP-AT-06` run `NOT_IMPLEMENTED` (operator-attested pre-check + live run pending) |
+| FP-04 | R1 | REQUIRED (depends on FP-01..FP-03) | Quality gates, evidence checks, `pnpm planner:smoke` opt-in CLI + shared transport hardening (`redirect: 'error'`, 60s body-read deadline) | Automated `vitest` (`free-planner.test.ts`, `planner-smoke.test.ts`), `typecheck`, `lint`, `check:evidence` `PASS`; live `FP-AT-06` wire/schema `PASS` (`2026-11-26T15:08:45.482Z`, `billingModel: operator-attested`; proposal có 4 `ERROR` findings, chất lượng continuity chưa đạt) |
 
 ### Test-First Evidence (R0 / R1)
 - **Test**: `packages/contracts/src/story.test.ts > validates planProposalRequestSchema defaults and strict storyProposalV2Schema boundaries (FP-AT-01)`
@@ -45,10 +45,22 @@ Use the [canonical workflow](../../.agents/rules/plan-breakdown-handoff.md).
   - [clients/components/storyboard.tsx](../../clients/components/storyboard.tsx) (`Generate story with Gemini` button, versioned draft envelope, `LIVE_LLM` provenance & stale findings)
   - [tests/e2e/story.spec.ts](../../tests/e2e/story.spec.ts) (`FP-AT-05`)
 - **Limits & Blockers**:
-  - Fake transport tests (`free-planner.test.ts`) verify the wire contract only, not live Google API connectivity.
+  - Fake transport tests (`free-planner.test.ts`) verify the wire contract only; live wire/schema compatibility is verified by `FP-AT-06` below. Billing tier remains **operator-attested** (not verified by API metadata or response).
   - Earlier local sandbox PG16/E2E access failures are superseded for commit `3d5ad01` by the CI evidence below; no local runtime success is claimed.
-  - Opt-in live smoke test (`FP-AT-06`) was not executed: **runtime integration chưa xác minh**.
   - Historical `LP-02` behavioral RED gap in [local-pan-zoom/tasks.md](../local-pan-zoom/tasks.md) remains open and is not exempted by `FREE-PLAN-01`.
+
+### Live Smoke Verification (`FP-AT-06`) — 2026-11-26
+- **Command**: `pnpm planner:smoke -- --run-live --confirm-free-tier` (1 call, no retry)
+- **Operator Attestation**: Operator confirmed Free Tier project setup in Google AI Studio and configured `servers/.env` prior to execution (`2026-11-26T15:08Z`); billing status remains `operator-attested`.
+- **Verdict**: **Live wire/schema PASS; proposal có 4 ERROR, chất lượng continuity chưa đạt.** (`PASS` chỉ xác nhận API trả JSON đúng Story v2 schema và references hợp lệ, không xác nhận story đủ điều kiện continuity/approval; runner đã được bổ sung `findings: [{ code, path, severity, waivable }]` cho các lần chạy sau mà không gọi lại Gemini cho lần chạy này.)
+- **Result**: `PASS` (exit 0)
+  - `timestampUtc`: `2026-11-26T15:08:45.482Z`
+  - `model`: `gemini-3.5-flash-lite`
+  - `billingModel`: `operator-attested`
+  - `preflightStatus`: `READY`
+  - `generationRequestsStarted`: `1`
+  - `durationMs`: `5914`
+  - `scenesCount`: `1`, `shotsCount`: `3`, `findingsBySeverity`: `{ ERROR: 4, WARNING: 0 }`, `errorCode`: `null`
 
 ### CI repair verification — 2026-11-26
 - **Scope**: REQUIRED R2 test-fixture/locator repairs for `FP-AT-04`, `FP-AT-05` and `FP-AT-05b`; no production behavior or public interface change.
